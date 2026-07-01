@@ -1,0 +1,382 @@
+import { asc, eq, inArray } from "drizzle-orm";
+import { getDb, kids, snapshots, stocks, transactions } from "@/db";
+import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
+import { isMarketDay, lastCompletedMarketDay } from "./market";
+
+export const RISK_FREE_RATE = 0.045;
+
+export type Position = {
+  ticker: string;
+  name: string;
+  sector: string;
+  logoUrl: string | null;
+  shares: number;
+  costBasis: number; // total dollars paid for current shares (avg-cost method)
+  avgCost: number;
+  realizedPnl: number;
+  price: number;
+  prevClose: number | null;
+  value: number;
+  dayChange: number; // dollars today
+  dayChangePct: number;
+  unrealizedPnl: number;
+  unrealizedPnlPct: number;
+};
+
+export type Portfolio = {
+  kidId: number;
+  positions: Position[];
+  cash: number;
+  holdingsValue: number;
+  totalValue: number;
+  invested: number; // net dollars deployed (buys - sells - dividends received)
+  startingBudget: number;
+  dayChange: number;
+  dayChangePct: number;
+  totalReturnPct: number; // vs net contributions
+  realizedPnl: number;
+  dividendsReceived: number;
+};
+
+type TxRow = typeof transactions.$inferSelect;
+
+/** Replay transactions to get share counts, avg-cost basis, cash, realized P&L. */
+export function replayTransactions(
+  txs: TxRow[],
+  startingBudget: number
+): {
+  shares: Map<string, number>;
+  costBasis: Map<string, number>;
+  realized: Map<string, number>;
+  cash: number;
+  dividends: number;
+} {
+  const shares = new Map<string, number>();
+  const costBasis = new Map<string, number>();
+  const realized = new Map<string, number>();
+  let cash = startingBudget;
+  let dividends = 0;
+
+  const sorted = [...txs].sort(
+    (a, b) => a.tradeDate.localeCompare(b.tradeDate) || a.id - b.id
+  );
+  for (const tx of sorted) {
+    const s = shares.get(tx.ticker) ?? 0;
+    const cb = costBasis.get(tx.ticker) ?? 0;
+    if (tx.type === "buy") {
+      shares.set(tx.ticker, s + tx.shares);
+      costBasis.set(tx.ticker, cb + tx.amount);
+      cash -= tx.amount;
+    } else if (tx.type === "sell") {
+      const sellShares = Math.min(tx.shares, s);
+      const avg = s > 0 ? cb / s : 0;
+      const basisOut = avg * sellShares;
+      shares.set(tx.ticker, s - sellShares);
+      costBasis.set(tx.ticker, cb - basisOut);
+      realized.set(tx.ticker, (realized.get(tx.ticker) ?? 0) + (tx.amount - basisOut));
+      cash += tx.amount;
+    } else if (tx.type === "dividend") {
+      cash += tx.amount;
+      dividends += tx.amount;
+    } else if (tx.type === "deposit") {
+      // External money in (used by the robot rival's mirrored funding).
+      cash += tx.amount;
+    }
+  }
+  return { shares, costBasis, realized, cash, dividends };
+}
+
+export async function getPortfolio(kidId: number): Promise<Portfolio> {
+  const db = await getDb();
+  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
+  if (!kid) throw new Error(`Kid ${kidId} not found`);
+
+  const txs = await db.select().from(transactions).where(eq(transactions.kidId, kidId));
+  const { shares, costBasis, realized, cash, dividends } = replayTransactions(
+    txs,
+    kid.startingBudget
+  );
+
+  const held = [...shares.entries()].filter(([, n]) => n > 1e-9);
+  const tickers = held.map(([t]) => t);
+  const [quoteMap, stockRows] = await Promise.all([
+    getQuotes(tickers),
+    tickers.length
+      ? db.select().from(stocks).where(inArray(stocks.ticker, tickers))
+      : Promise.resolve([]),
+  ]);
+  const stockByTicker = new Map(stockRows.map((s) => [s.ticker, s]));
+
+  const positions: Position[] = held.map(([ticker, n]) => {
+    const q = quoteMap.get(ticker);
+    const st = stockByTicker.get(ticker);
+    const cbForFallback = costBasis.get(ticker) ?? 0;
+    // No live quote (offline / API hiccup): value at average cost rather than $0.
+    const price = q?.price ?? (n > 0 ? cbForFallback / n : 0);
+    const prevClose = q?.prevClose ?? null;
+    const cb = costBasis.get(ticker) ?? 0;
+    const value = n * price;
+    const dayChange = prevClose != null ? (price - prevClose) * n : 0;
+    return {
+      ticker,
+      name: st?.name ?? ticker,
+      sector: st?.sector ?? "Unknown",
+      logoUrl: st?.logoUrl ?? null,
+      shares: n,
+      costBasis: cb,
+      avgCost: n > 0 ? cb / n : 0,
+      realizedPnl: realized.get(ticker) ?? 0,
+      price,
+      prevClose,
+      value,
+      dayChange,
+      dayChangePct:
+        prevClose != null && prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+      unrealizedPnl: value - cb,
+      unrealizedPnlPct: cb > 0 ? ((value - cb) / cb) * 100 : 0,
+    };
+  });
+
+  positions.sort((a, b) => b.value - a.value);
+  const holdingsValue = positions.reduce((s, p) => s + p.value, 0);
+  const totalValue = holdingsValue + cash;
+  const dayChange = positions.reduce((s, p) => s + p.dayChange, 0);
+  const prevTotal = totalValue - dayChange;
+  const invested = txs
+    .filter((t) => t.type === "buy")
+    .reduce((s, t) => s + t.amount, 0);
+  const totalRealized = [...realized.values()].reduce((s, v) => s + v, 0);
+
+  // Money the outside world put in: starting budget plus any deposits
+  // (the robot rival is funded entirely by mirrored deposits).
+  const contributions =
+    kid.startingBudget +
+    txs.filter((t) => t.type === "deposit").reduce((s, t) => s + t.amount, 0);
+
+  return {
+    kidId,
+    positions,
+    cash,
+    holdingsValue,
+    totalValue,
+    invested,
+    startingBudget: kid.startingBudget,
+    dayChange,
+    dayChangePct: prevTotal > 0 ? (dayChange / prevTotal) * 100 : 0,
+    totalReturnPct:
+      contributions > 0 ? ((totalValue - contributions) / contributions) * 100 : 0,
+    realizedPnl: totalRealized,
+    dividendsReceived: dividends,
+  };
+}
+
+// ── Snapshots ─────────────────────────────────────────────────────
+
+/**
+ * Rebuild end-of-day snapshots for a kid from their first transaction through the
+ * last completed market day, using cached daily closes. Idempotent.
+ */
+export async function backfillSnapshots(kidId: number): Promise<number> {
+  const db = await getDb();
+  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
+  if (!kid) return 0;
+  const txs = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.kidId, kidId))
+    .orderBy(asc(transactions.tradeDate));
+  if (txs.length === 0) return 0;
+
+  const firstDate = txs[0].tradeDate;
+  const endDate = lastCompletedMarketDay();
+  if (firstDate > endDate) return 0;
+
+  const tickers = [...new Set(txs.filter((t) => t.type !== "dividend").map((t) => t.ticker))];
+  await Promise.all(tickers.map((t) => ensurePriceHistory(t, firstDate)));
+  const histories = new Map<string, Map<string, number>>();
+  for (const t of tickers) {
+    const rows = await getPriceHistory(t, firstDate);
+    histories.set(t, new Map(rows.map((r) => [r.date, r.close])));
+  }
+
+  // Walk each market day, replaying transactions up to that day.
+  let count = 0;
+  const cursor = new Date(`${firstDate}T12:00:00Z`);
+  const lastKnownClose = new Map<string, number>();
+  while (cursor.toISOString().slice(0, 10) <= endDate) {
+    const ds = cursor.toISOString().slice(0, 10);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    if (!isMarketDay(ds)) continue;
+
+    const upTo = txs.filter((t) => t.tradeDate <= ds);
+    const { shares, cash } = replayTransactions(upTo, kid.startingBudget);
+    let holdingsValue = 0;
+    for (const [ticker, n] of shares) {
+      if (n <= 1e-9) continue;
+      const close = histories.get(ticker)?.get(ds) ?? lastKnownClose.get(ticker) ?? 0;
+      if (histories.get(ticker)?.get(ds) != null) {
+        lastKnownClose.set(ticker, histories.get(ticker)!.get(ds)!);
+      }
+      holdingsValue += n * close;
+    }
+    const invested = upTo.filter((t) => t.type === "buy").reduce((s, t) => s + t.amount, 0);
+    await db
+      .insert(snapshots)
+      .values({
+        kidId,
+        snapDate: ds,
+        value: holdingsValue + cash,
+        holdingsValue,
+        cash,
+        invested,
+      })
+      .onConflictDoUpdate({
+        target: [snapshots.kidId, snapshots.snapDate],
+        set: { value: holdingsValue + cash, holdingsValue, cash, invested },
+      });
+    count++;
+  }
+  return count;
+}
+
+export async function backfillAllSnapshots(): Promise<void> {
+  const db = await getDb();
+  const allKids = await db.select().from(kids);
+  for (const k of allKids) await backfillSnapshots(k.id);
+}
+
+// ── Stats: returns, volatility, Sharpe ────────────────────────────
+
+export type PortfolioStats = {
+  volatilityAnnualPct: number | null;
+  sharpe: number | null;
+  riskLabel: "Low" | "Medium" | "High" | null;
+  weekReturnPct: number | null;
+  sinceStartReturnPct: number | null;
+};
+
+/**
+ * Time-weighted daily returns per market day, adjusted for external deposits
+ * (the robot rival is funded by mirrored deposits mid-competition; kids get all
+ * cash on day one). r_t = (V_t - deposits_t) / V_{t-1} - 1.
+ */
+async function getDailyReturns(
+  kidId: number
+): Promise<{ dates: string[]; returns: number[] }> {
+  const db = await getDb();
+  const snaps = await db
+    .select()
+    .from(snapshots)
+    .where(eq(snapshots.kidId, kidId))
+    .orderBy(asc(snapshots.snapDate));
+  if (snaps.length < 2) return { dates: [], returns: [] };
+
+  const txs = await db.select().from(transactions).where(eq(transactions.kidId, kidId));
+  const depositsByDay = new Map<string, number>();
+  for (const t of txs) {
+    if (t.type === "deposit") {
+      depositsByDay.set(t.tradeDate, (depositsByDay.get(t.tradeDate) ?? 0) + t.amount);
+    }
+  }
+
+  const dates: string[] = [];
+  const returns: number[] = [];
+  for (let i = 1; i < snaps.length; i++) {
+    const prev = snaps[i - 1].value;
+    const dep = depositsByDay.get(snaps[i].snapDate) ?? 0;
+    if (prev > 0) {
+      dates.push(snaps[i].snapDate);
+      returns.push((snaps[i].value - dep) / prev - 1);
+    }
+  }
+  return { dates, returns };
+}
+
+/** Growth-of-$100 index series (time-weighted), for the race chart. */
+export async function getReturnSeries(
+  kidId: number
+): Promise<{ date: string; index: number }[]> {
+  const db = await getDb();
+  const snaps = await db
+    .select()
+    .from(snapshots)
+    .where(eq(snapshots.kidId, kidId))
+    .orderBy(asc(snapshots.snapDate));
+  if (snaps.length === 0) return [];
+  const { dates, returns } = await getDailyReturns(kidId);
+  const series = [{ date: snaps[0].snapDate, index: 100 }];
+  let idx = 100;
+  for (let i = 0; i < dates.length; i++) {
+    idx *= 1 + returns[i];
+    series.push({ date: dates[i], index: idx });
+  }
+  return series;
+}
+
+export async function getStats(kidId: number): Promise<PortfolioStats> {
+  const { returns: rets } = await getDailyReturns(kidId);
+  if (rets.length < 2) {
+    return {
+      volatilityAnnualPct: null,
+      sharpe: null,
+      riskLabel: null,
+      weekReturnPct: null,
+      sinceStartReturnPct: null,
+    };
+  }
+
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const variance =
+    rets.reduce((s, r) => s + (r - mean) ** 2, 0) / Math.max(rets.length - 1, 1);
+  const dailyVol = Math.sqrt(variance);
+  const annualVol = dailyVol * Math.sqrt(252);
+  const annualRet = mean * 252;
+  const sharpe = annualVol > 0 ? (annualRet - RISK_FREE_RATE) / annualVol : null;
+
+  const riskLabel: PortfolioStats["riskLabel"] =
+    annualVol < 0.15 ? "Low" : annualVol < 0.28 ? "Medium" : "High";
+
+  const weekRets = rets.slice(-5);
+  const weekReturn = weekRets.reduce((acc, r) => acc * (1 + r), 1) - 1;
+  const totalReturn = rets.reduce((acc, r) => acc * (1 + r), 1) - 1;
+
+  return {
+    volatilityAnnualPct: annualVol * 100,
+    sharpe,
+    riskLabel,
+    weekReturnPct: weekReturn * 100,
+    sinceStartReturnPct: totalReturn * 100,
+  };
+}
+
+// ── Attribution (who moved my portfolio today / this week) ───────
+
+export type Attribution = { ticker: string; name: string; contributionPct: number; ownMovePct: number };
+
+/** Per-position contribution to today's portfolio move, in % of yesterday's total. */
+export function dayAttribution(p: Portfolio): Attribution[] {
+  const prevTotal = p.totalValue - p.dayChange;
+  if (prevTotal <= 0) return [];
+  return p.positions
+    .map((pos) => ({
+      ticker: pos.ticker,
+      name: pos.name,
+      contributionPct: (pos.dayChange / prevTotal) * 100,
+      ownMovePct: pos.dayChangePct,
+    }))
+    .sort((a, b) => b.contributionPct - a.contributionPct);
+}
+
+// ── Sector concentration ──────────────────────────────────────────
+
+export function sectorBreakdown(p: Portfolio): { sector: string; value: number; pct: number }[] {
+  const bySector = new Map<string, number>();
+  for (const pos of p.positions) {
+    bySector.set(pos.sector, (bySector.get(pos.sector) ?? 0) + pos.value);
+  }
+  if (p.cash > 0.01) bySector.set("Cash", p.cash);
+  const total = p.totalValue;
+  return [...bySector.entries()]
+    .map(([sector, value]) => ({ sector, value, pct: total > 0 ? (value / total) * 100 : 0 }))
+    .sort((a, b) => b.value - a.value);
+}

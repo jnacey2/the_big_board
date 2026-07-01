@@ -1,65 +1,225 @@
-import Image from "next/image";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { desc, eq } from "drizzle-orm";
+import { badges, getDb, kids as kidsTable } from "@/db";
+import { getCompetitors, getRaceData } from "@/lib/scoreboard";
+import { checkBadges } from "@/lib/badges";
+import RaceChart from "@/components/RaceChart";
+import Scoreboard, { type ScoreRow } from "@/components/Scoreboard";
+import CoachCommentary from "@/components/coach/CoachCommentary";
+import NumberTicker from "@/components/NumberTicker";
+import CoachTour from "@/components/CoachTour";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Dashboard() {
+  const db = await getDb();
+  const kidRows = await db.select().from(kidsTable);
+  if (kidRows.filter((k) => k.kind === "kid").length === 0) {
+    redirect("/setup");
+  }
+
+  const competitors = await getCompetitors();
+  const realKids = competitors.filter((c) => c.kind === "kid");
+
+  // Badge sweep (cheap: data is cached), then read recent badges.
+  for (const c of realKids) {
+    try {
+      await checkBadges(c.id, c.portfolio);
+    } catch {
+      /* non-fatal */
+    }
+  }
+  const recentBadges = await db
+    .select()
+    .from(badges)
+    .orderBy(desc(badges.awardedAt))
+    .limit(6);
+
+  const race = await getRaceData(competitors);
+
+  const scoreRows: ScoreRow[] = competitors
+    .filter((c) => c.kind === "kid" || c.portfolio.invested > 0)
+    .map((c) => ({
+      id: c.id,
+      kind: c.kind,
+      name: c.name,
+      teamName: c.teamName,
+      mascot: c.mascot,
+      color: c.color,
+      weekReturnPct: c.stats.weekReturnPct,
+      sinceStartReturnPct: c.stats.sinceStartReturnPct,
+      riskLabel: c.stats.riskLabel,
+      sharpe: c.stats.sharpe,
+      thesisScore: c.thesisScore,
+      thesisCount: c.thesisCount,
+      totalValue: c.portfolio.totalValue,
+    }));
+
+  // Today's movers across all kid holdings (unique tickers).
+  const seen = new Set<string>();
+  const movers = realKids
+    .flatMap((c) => c.portfolio.positions)
+    .filter((p) => {
+      if (seen.has(p.ticker)) return false;
+      seen.add(p.ticker);
+      return true;
+    })
+    .sort((a, b) => Math.abs(b.dayChangePct) - Math.abs(a.dayChangePct))
+    .slice(0, 6);
+
+  const anyTrades = realKids.some((c) => c.portfolio.invested > 0);
+  const kidNames = kidRows.filter((k) => k.kind === "kid").map((k) => k.name);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="animate-fade-up space-y-6">
+      <CoachTour kidNames={kidNames} />
+
+      {/* Hero cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {realKids.map((c) => (
+          <Link
+            key={c.id}
+            href={`/portfolio/${c.id}`}
+            className="panel panel-hover animate-glow-pulse p-5"
+            style={{ "--glow": c.color } as React.CSSProperties}
+          >
+            <div className="flex items-center gap-3">
+              <span
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 text-2xl"
+                style={{ borderColor: c.color, backgroundColor: `${c.color}18` }}
+              >
+                {c.mascot}
+              </span>
+              <div>
+                <div className="display text-lg font-extrabold leading-tight">{c.teamName}</div>
+                <div className="text-xs text-ink-dim">{c.name}</div>
+              </div>
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-ink-dim">Portfolio value</div>
+                <div className="display text-3xl font-extrabold">
+                  <NumberTicker value={c.portfolio.totalValue} prefix="$" />
+                </div>
+              </div>
+              <div className={`text-right ${c.portfolio.dayChangePct >= 0 ? "text-up" : "text-down"}`}>
+                <div className="text-xs uppercase tracking-wide opacity-70">Today</div>
+                <div className="text-lg font-extrabold tabular">
+                  {c.portfolio.dayChangePct >= 0 ? "+" : ""}
+                  {c.portfolio.dayChangePct.toFixed(2)}%
+                </div>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      {/* Race chart */}
+      <section className="panel p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="display text-xl font-extrabold">🏁 The Race</h2>
+          <span className="text-xs text-ink-dim">Growth of every dollar, % since start</span>
+        </div>
+        <div className="mt-2">
+          <RaceChart series={race} />
+        </div>
+      </section>
+
+      {/* Scoreboard */}
+      <section>
+        <h2 className="display mb-3 text-xl font-extrabold">🏆 Championship Belts</h2>
+        <Scoreboard rows={scoreRows} />
+      </section>
+
+      {!anyTrades && (
+        <div className="panel border-dashed p-8 text-center">
+          <div className="text-4xl">🎪</div>
+          <h3 className="display mt-2 text-xl font-extrabold">The competition hasn&apos;t started yet!</h3>
+          <p className="mx-auto mt-1 max-w-md text-sm text-ink-dim">
+            First, run the draft to pick your rosters. Then a parent logs the real buys in Parent HQ, and the
+            race is on.
           </p>
+          <div className="mt-4 flex justify-center gap-3">
+            <Link href="/draft" className="rounded-xl bg-neon px-5 py-3 font-bold text-night hover:brightness-110">
+              Start Draft Day 🎤
+            </Link>
+            <Link href="/admin" className="rounded-xl bg-panel2 px-5 py-3 font-bold text-ink hover:bg-edge">
+              Parent HQ
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Today's movers */}
+        <section className="panel p-5">
+          <h2 className="display text-xl font-extrabold">⚡ Today&apos;s Movers</h2>
+          <div className="mt-3 space-y-2">
+            {movers.map((m) => (
+              <Link
+                key={m.ticker}
+                href={`/stock/${m.ticker}`}
+                className="flex items-center gap-3 rounded-xl border border-edge bg-panel2/60 px-3 py-2.5 transition-colors hover:border-neon/40"
+              >
+                {m.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={m.logoUrl} alt="" className="h-8 w-8 rounded-lg bg-white/90 object-contain p-0.5" />
+                ) : (
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-panel text-xs font-bold">
+                    {m.ticker.slice(0, 2)}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-bold">{m.name}</div>
+                  <div className="text-xs text-ink-dim">{m.ticker}</div>
+                </div>
+                <div className={`text-right font-extrabold tabular ${m.dayChangePct >= 0 ? "text-up" : "text-down"}`}>
+                  {m.dayChangePct >= 0 ? "▲" : "▼"} {Math.abs(m.dayChangePct).toFixed(2)}%
+                </div>
+              </Link>
+            ))}
+            {movers.length === 0 && (
+              <p className="py-6 text-center text-sm text-ink-dim">No holdings yet — movers show up once stocks are owned.</p>
+            )}
+          </div>
+        </section>
+
+        {/* Recent badges */}
+        <section className="panel p-5">
+          <h2 className="display text-xl font-extrabold">🎖️ Trophy Case</h2>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {recentBadges.map((b) => {
+              const owner = competitors.find((c) => c.id === b.kidId);
+              return (
+                <div key={b.id} className="animate-pop rounded-xl border border-gold/25 bg-gold/5 px-3 py-2.5">
+                  <div className="text-2xl">{b.emoji}</div>
+                  <div className="mt-1 text-sm font-extrabold">{b.name}</div>
+                  <div className="text-xs text-ink-dim">
+                    {owner?.mascot} {owner?.name} — {b.description}
+                  </div>
+                </div>
+              );
+            })}
+            {recentBadges.length === 0 && (
+              <p className="col-span-2 py-6 text-center text-sm text-ink-dim">
+                No badges yet. First trade earns the Opening Bell! 🔔
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Weekly recaps */}
+      {anyTrades && (
+        <section className="grid gap-4 lg:grid-cols-2">
+          {realKids.map((c) => (
+            <div key={c.id} className="panel p-5" style={{ "--glow": c.color } as React.CSSProperties}>
+              <CoachCommentary module="weeklyRecap" kidId={c.id} title={`${c.mascot} ${c.teamName} — This Week`} />
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }
