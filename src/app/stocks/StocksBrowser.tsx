@@ -23,6 +23,8 @@ const CATEGORY_EMOJI: Record<string, string> = {
   "Food & Treats": "🍩",
   "Tech They Use": "📱",
   "Rides & Travel": "✈️",
+  "Space & Sky": "🚀",
+  "Big Machines": "🚜",
   "Sports & Style": "👟",
   Entertainment: "🎬",
   Stores: "🛒",
