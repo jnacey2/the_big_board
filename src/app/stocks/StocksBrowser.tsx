@@ -18,6 +18,7 @@ export type StockItem = {
 };
 
 const CATEGORY_EMOJI: Record<string, string> = {
+  "AI & Big Compute": "🤖",
   "Games & Toys": "🎮",
   "Food & Treats": "🍩",
   "Tech They Use": "📱",
