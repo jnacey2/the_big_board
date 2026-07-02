@@ -1,15 +1,17 @@
 # 📈 The Big Board
 
 A family stock-market competition app that teaches kids how to invest real money.
-Two (or more) kids draft companies fantasy-sports style, a parent logs the real
-buys, and everyone watches the race — with an AI Coach explaining every move in
-kid-friendly language.
+Two (or more) kids draft companies fantasy-sports style, one tap turns the
+draft into equal-weighted portfolios at the latest prices, and everyone watches
+the race — with an AI Coach explaining every move in kid-friendly language.
 
 ## What's inside
 
 - **Draft Day** — snake draft over 40 kid-friendly companies with flippable
   scouting cards (products they know, how the company makes money, bull/bear
-  cases, valuation labels, teaching concepts) and live Coach commentary.
+  cases, valuation labels, teaching concepts) and live Coach commentary. When
+  the draft ends, a "Buy the portfolios!" button splits each kid's budget
+  equally across their picks at the last available prices (fractional shares).
 - **The Race** — growth-of-$100 chart for every kid plus **Indexo**, a robot
   rival that mirrors every kid trade into SPY so they can see how they stack up
   against "just buying the market."
@@ -23,7 +25,7 @@ kid-friendly language.
 - **Coach everywhere** — daily recaps, weekly recaps, movement summaries, a
   floating chat drawer, thesis grading, and a first-visit tour. The Coach uses
   hedged language ("likely", "may") and never gives buy/sell advice.
-- **Parent HQ** (PIN-gated) — log real fractional buys/sells, manage kids and
+- **Parent HQ** (PIN-gated) — log additional fractional buys/sells, manage kids and
   budgets, confirm auto-detected dividends, read chat transcripts and theses,
   export CSVs.
 - **Badges, glossary tooltips, confetti,** and a market open/closed chip.

@@ -95,6 +95,8 @@ export const drafts = pgTable("drafts", {
   pickTimerSecs: integer("pick_timer_secs").notNull().default(0), // 0 = no timer
   kidOrder: jsonb("kid_order").notNull().$type<number[]>(), // kid ids in round-1 order
   currentPick: integer("current_pick").notNull().default(0), // 0-based overall pick number
+  /** When the draft was turned into real buy transactions (equal-weight). */
+  executedAt: timestamp("executed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

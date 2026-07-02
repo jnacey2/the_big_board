@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import ScoutingCard, { type StockCard } from "./ScoutingCard";
 import { ThesisBox } from "@/components/HoldingsList";
+import type { ExecutedTeam } from "@/app/api/draft/execute/route";
 
 type Kid = { id: number; kind: string; name: string; teamName: string; mascot: string; color: string };
 type Draft = {
@@ -16,6 +17,7 @@ type Draft = {
   pickTimerSecs: number;
   kidOrder: number[];
   currentPick: number;
+  executedAt: string | null;
 };
 type Pick = {
   id: number;
@@ -141,13 +143,11 @@ export default function DraftRoom() {
           <div className="text-5xl">🎉</div>
           <h1 className="display mt-2 text-3xl font-extrabold">Draft Complete!</h1>
           <p className="mt-1 text-ink-dim">
-            Now a parent logs the real buys in{" "}
-            <Link href="/admin" className="text-neon underline">
-              Parent HQ
-            </Link>{" "}
-            and the competition begins.
+            One tap splits each team&apos;s budget equally across their picks — then the competition
+            begins.
           </p>
         </div>
+        <ExecutePortfolios draft={draft} onExecuted={load} />
         <Rosters kids={kids} picks={picks} stocks={stocks} />
         <CommentaryFeed picks={picks} kids={kids} stocks={stocks} />
         <div className="text-center">
@@ -208,6 +208,107 @@ export default function DraftRoom() {
       </div>
 
       <ThesisModal thesisFor={thesisFor} onClose={() => setThesisFor(null)} />
+    </div>
+  );
+}
+
+// ── Buy the portfolios (equal-weight draft execution) ──────────
+
+function ExecutePortfolios({ draft, onExecuted }: { draft: Draft; onExecuted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [teams, setTeams] = useState<ExecutedTeam[] | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/draft/execute", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(
+          data.failedTickers
+            ? `Prices aren't available right now (${(data.failedTickers as string[]).join(", ")}), so nothing was bought. Check the FMP API key and try again.`
+            : data.error ?? "Something went wrong — nothing was bought."
+        );
+        return;
+      }
+      setTeams(data.teams);
+      confetti({ particleCount: 250, spread: 130, origin: { y: 0.4 } });
+      onExecuted();
+    } catch {
+      setError("Something went wrong — nothing was bought. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (teams) {
+    return (
+      <div className="panel mx-auto max-w-2xl space-y-4 p-6">
+        <h2 className="display text-center text-2xl font-extrabold">🏁 Portfolios are live!</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {teams.map((t) => (
+            <div key={t.kidId} className="rounded-xl border border-edge bg-panel2/70 p-4" style={{ "--glow": t.color } as React.CSSProperties}>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{t.mascot}</span>
+                <span className="display font-extrabold" style={{ color: t.color }}>
+                  {t.teamName}
+                </span>
+              </div>
+              <ul className="mt-2 space-y-1 text-sm">
+                {t.positions.map((p) => (
+                  <li key={p.ticker} className="flex items-baseline justify-between gap-2">
+                    <span className="font-bold">{p.ticker}</span>
+                    <span className="text-ink-dim tabular">
+                      {p.shares.toFixed(4)} sh @ ${p.price.toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 border-t border-edge pt-2 text-xs text-ink-dim">
+                ${t.cashSpent.toFixed(2)} invested
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="text-center">
+          <Link href="/" className="inline-block rounded-xl bg-neon px-6 py-3 font-extrabold text-night hover:brightness-110">
+            Watch the race →
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (draft.executedAt) {
+    return (
+      <div className="panel mx-auto max-w-md p-5 text-center">
+        <button disabled className="w-full cursor-default rounded-xl bg-panel2 py-4 text-lg font-extrabold text-ink-dim">
+          ✅ Portfolios are bought!
+        </button>
+        <Link href="/" className="mt-3 inline-block text-sm font-bold text-neon underline">
+          Watch the race →
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-md text-center">
+      <button
+        onClick={run}
+        disabled={busy}
+        className="w-full rounded-xl bg-neon py-5 text-xl font-extrabold text-night hover:brightness-110 disabled:opacity-40"
+      >
+        {busy ? "Placing the orders…" : "🏁 Buy the portfolios!"}
+      </button>
+      <p className="mt-2 text-xs text-ink-dim">
+        Each team&apos;s cash gets split equally across their picks at today&apos;s prices — and
+        Indexo puts the same dollars into SPY.
+      </p>
+      {error && <p className="mt-2 text-sm font-bold text-down">{error}</p>}
     </div>
   );
 }

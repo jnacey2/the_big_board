@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { getDb, kids, transactions } from "@/db";
 import { isAdmin } from "@/lib/adminAuth";
-import { ensurePriceHistory, getPriceHistory, getQuotes } from "@/lib/fmp";
 import { backfillSnapshots, replayTransactions } from "@/lib/portfolio";
-import { etDateStr, isMarketOpen } from "@/lib/market";
+import { executeBuy, executeSell } from "@/lib/trades";
+import { etDateStr } from "@/lib/market";
 
 export const maxDuration = 60;
 
@@ -22,21 +22,6 @@ export async function GET(req: NextRequest) {
         .from(transactions)
         .orderBy(desc(transactions.tradeDate), desc(transactions.id));
   return NextResponse.json(rows);
-}
-
-/** Close price of `ticker` on `date` (or the last close before it); live quote for today. */
-async function priceOn(ticker: string, date: string): Promise<number | null> {
-  if (date === etDateStr() && isMarketOpen()) {
-    const q = (await getQuotes([ticker])).get(ticker);
-    if (q) return q.price;
-  }
-  await ensurePriceHistory(ticker, date);
-  const hist = await getPriceHistory(ticker, "1970-01-01");
-  const onOrBefore = hist.filter((h) => h.date <= date);
-  if (onOrBefore.length > 0) return onOrBefore[onOrBefore.length - 1].close;
-  // date precedes history (e.g. today, market not yet in daily data): use quote
-  const q = (await getQuotes([ticker])).get(ticker);
-  return q?.price ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -79,81 +64,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const [tx] = await db
-    .insert(transactions)
-    .values({
-      kidId: kid.id,
-      ticker,
-      type,
-      shares: nShares,
-      price: nPrice,
-      amount,
-      tradeDate: date,
-      note: note || null,
-    })
-    .returning();
-
-  // ── Robot rival mirror: same dollars into/out of SPY on the same date ──
-  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
-  if (robot) {
-    const spyPrice = await priceOn("SPY", date).catch((e) => {
-      console.error("SPY price lookup failed (robot mirror skipped):", e);
-      return null;
-    });
-    if (spyPrice && spyPrice > 0) {
-      if (type === "buy") {
-        // Fund the robot with the same dollars, then buy SPY.
-        await db.insert(transactions).values({
-          kidId: robot.id,
-          ticker: "SPY",
-          type: "deposit",
-          shares: 0,
-          price: 0,
-          amount,
-          tradeDate: date,
-          note: `mirrors ${kid.teamName} ${ticker} buy`,
-          mirrorsTransactionId: tx.id,
-        });
-        await db.insert(transactions).values({
-          kidId: robot.id,
-          ticker: "SPY",
-          type: "buy",
-          shares: amount / spyPrice,
-          price: spyPrice,
-          amount,
-          tradeDate: date,
-          note: `mirrors ${kid.teamName} ${ticker} buy`,
-          mirrorsTransactionId: tx.id,
-        });
-      } else {
-        // Sell the same dollar amount of SPY (capped at what the robot holds).
-        const robotTxs = await db
-          .select()
-          .from(transactions)
-          .where(eq(transactions.kidId, robot.id));
-        const robotState = replayTransactions(robotTxs, 0);
-        const heldSpy = robotState.shares.get("SPY") ?? 0;
-        const sellShares = Math.min(amount / spyPrice, heldSpy);
-        if (sellShares > 1e-9) {
-          await db.insert(transactions).values({
-            kidId: robot.id,
-            ticker: "SPY",
-            type: "sell",
-            shares: sellShares,
-            price: spyPrice,
-            amount: sellShares * spyPrice,
-            tradeDate: date,
-            note: `mirrors ${kid.teamName} ${ticker} sell`,
-            mirrorsTransactionId: tx.id,
-          });
-        }
-      }
-    }
-  }
+  // Insert the trade + the robot rival's mirrored SPY trade.
+  const tx =
+    type === "buy"
+      ? await executeBuy(kid.id, ticker, nShares, nPrice, date, { note: note || null })
+      : await executeSell(kid.id, ticker, nShares, nPrice, date, { note: note || null });
 
   // Refresh snapshot history so charts update immediately (best-effort — it
   // needs FMP history; the cron will backfill anything missed).
   await backfillSnapshots(kid.id).catch((e) => console.error("snapshot backfill failed:", e));
+  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
   if (robot) {
     await backfillSnapshots(robot.id).catch((e) => console.error("robot backfill failed:", e));
   }
