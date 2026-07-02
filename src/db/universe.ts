@@ -607,15 +607,26 @@ export const STOCK_UNIVERSE: UniverseStock[] = [
   },
   // ── Space & Sky ─────────────────────────────────────────────────
   {
+    ticker: "SPCX",
+    name: "SpaceX",
+    sector: "Industrials",
+    category: "Space & Sky",
+    productsBlurb: "Falcon rockets that land themselves, the giant Starship, Dragon capsules for astronauts, and Starlink internet from space.",
+    howMoneyBlurb: "Charges customers to launch satellites and astronauts, and collects monthly Starlink subscriptions beamed from thousands of its own satellites.",
+    bullBlurb: "It launches more rockets than the rest of the world combined, reuses them to keep costs low, and Starlink subscription money grows every month.",
+    bearBlurb: "After the biggest IPO in history (June 2026), the price already assumes Starship and Mars-sized dreams come true — and rockets sometimes blow up.",
+    teachingConcept: "IPOs (going public)",
+  },
+  {
     ticker: "RKLB",
     name: "Rocket Lab",
     sector: "Industrials",
     category: "Space & Sky",
     productsBlurb: "Real rockets! Rocket Lab launches satellites to space almost every month.",
     howMoneyBlurb: "Charges companies and governments to launch satellites, and builds satellite parts and spacecraft for them too.",
-    bullBlurb: "SpaceX is private — you can't buy its stock — so Rocket Lab is one of the only real rocket companies anyone can own, and its bigger Neutron rocket is coming.",
+    bullBlurb: "Customers don't want to depend on SpaceX alone, so the scrappy number two keeps winning launches — and its bigger Neutron rocket is coming.",
     bearBlurb: "Rockets are hard: launches can fail, the company isn't profitable yet, and SpaceX is a giant competitor.",
-    teachingConcept: "Public vs. private companies",
+    teachingConcept: "Being the backup choice (second source)",
   },
   {
     ticker: "BA",
