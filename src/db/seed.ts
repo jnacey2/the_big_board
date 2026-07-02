@@ -1,33 +1,20 @@
-import { getDb, stocks } from "./index";
+import { getDb } from "./index";
 import { STOCK_UNIVERSE, BENCHMARK } from "./universe";
 
+/**
+ * The stock universe is seeded automatically (and idempotently) whenever the
+ * database is initialized — see seedStockUniverse in ./index.ts. This script
+ * just triggers that init, for manually refreshing a local database.
+ */
 export async function seedStocks() {
-  const db = await getDb();
-  const all = [...STOCK_UNIVERSE, BENCHMARK];
-  for (const s of all) {
-    await db
-      .insert(stocks)
-      .values({
-        ticker: s.ticker,
-        name: s.name,
-        sector: s.sector,
-        category: s.category,
-        productsBlurb: s.productsBlurb,
-        howMoneyBlurb: s.howMoneyBlurb,
-        bullBlurb: s.bullBlurb,
-        bearBlurb: s.bearBlurb,
-        teachingConcept: s.teachingConcept,
-        isBenchmark: s.isBenchmark ?? false,
-      })
-      .onConflictDoNothing();
-  }
-  return all.length;
+  await getDb();
+  return STOCK_UNIVERSE.length + 1; // + benchmark
 }
 
 if (process.argv[1]?.endsWith("seed.ts")) {
   seedStocks()
     .then((n) => {
-      console.log(`Seeded ${n} stocks`);
+      console.log(`Seeded ${n} stocks (${BENCHMARK.ticker} benchmark included)`);
       process.exit(0);
     })
     .catch((e) => {

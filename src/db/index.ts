@@ -1,11 +1,32 @@
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
+import { STOCK_UNIVERSE, BENCHMARK } from "./universe";
 
 export type Db = NodePgDatabase<typeof schema>;
 
 declare global {
   // eslint-disable-next-line no-var
   var __kidsDb: Promise<Db> | undefined;
+}
+
+/**
+ * Idempotently populate the stock universe (onConflictDoNothing), so a fresh
+ * production database is ready to use without a manual seed step.
+ */
+async function seedStockUniverse(db: Db): Promise<void> {
+  const rows = [...STOCK_UNIVERSE, BENCHMARK].map((s) => ({
+    ticker: s.ticker,
+    name: s.name,
+    sector: s.sector,
+    category: s.category,
+    productsBlurb: s.productsBlurb,
+    howMoneyBlurb: s.howMoneyBlurb,
+    bullBlurb: s.bullBlurb,
+    bearBlurb: s.bearBlurb,
+    teachingConcept: s.teachingConcept,
+    isBenchmark: s.isBenchmark ?? false,
+  }));
+  await db.insert(schema.stocks).values(rows).onConflictDoNothing();
 }
 
 async function init(): Promise<Db> {
@@ -21,6 +42,7 @@ async function init(): Promise<Db> {
     });
     const db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: "./drizzle" });
+    await seedStockUniverse(db);
     return db;
   }
 
@@ -29,6 +51,7 @@ async function init(): Promise<Db> {
   const { migrate } = await import("drizzle-orm/pglite/migrator");
   const db = drizzle("./.pglite", { schema });
   await migrate(db, { migrationsFolder: "./drizzle" });
+  await seedStockUniverse(db as unknown as Db);
   return db as unknown as Db;
 }
 

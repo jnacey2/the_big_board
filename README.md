@@ -56,10 +56,10 @@ CRON_SECRET=...        # any random string
 # DATABASE_URL is optional locally — PGlite (embedded Postgres) is used if unset
 ```
 
-3. Seed the 40-stock universe and start the dev server:
+3. Start the dev server (the 40-stock universe is seeded automatically on first
+   database init):
 
 ```bash
-npm run db:seed
 npm run dev
 ```
 
@@ -73,8 +73,15 @@ Coach sits out), but you'll want both keys for the real experience.
 
 `render.yaml` defines everything: a web service, a Postgres database, and a
 nightly cron job (runs after market close to snapshot portfolios and detect
-dividends). Create a new Blueprint on Render pointing at this repo, then set
-`FMP_API_KEY`, `ANTHROPIC_API_KEY`, and `ADMIN_PIN` in the dashboard.
+dividends).
+
+1. On Render, create a **New Blueprint** and link this repo (branch `main`).
+2. During Blueprint setup, Render prompts for the `sync: false` secrets:
+   `FMP_API_KEY` (web service **and** cron job), plus `ANTHROPIC_API_KEY` and
+   `ADMIN_PIN` (web service). `CRON_SECRET` and `DATABASE_URL` are wired up
+   automatically.
+3. Deploy. On first boot the app runs Drizzle migrations and seeds the
+   40-stock universe automatically — no manual database steps.
 
 ## Useful scripts
 
@@ -82,7 +89,7 @@ dividends). Create a new Blueprint on Render pointing at this repo, then set
 npm run dev          # dev server
 npm run build        # production build
 npm run db:generate  # regenerate Drizzle migrations after schema changes
-npm run db:seed      # seed/refresh the stock universe
+npm run db:seed      # manually re-run the (automatic) stock universe seed
 ```
 
 To reset all local data (kids, trades, drafts), delete the `.pglite/` folder.
