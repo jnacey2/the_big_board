@@ -35,7 +35,7 @@ type Chat = { id: number; kidId: number; role: string; content: string; createdA
 type Thesis = { id: number; kidId: number; ticker: string; body: string; score: number | null; updatedAt: string };
 type StockRow = { ticker: string; name: string; isBenchmark: boolean };
 
-const TABS = ["Transactions", "Kids", "Dividends", "Oversight", "Export"] as const;
+const TABS = ["Transactions", "Kids", "Dividends", "Oversight", "Export", "Reset"] as const;
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -117,6 +117,7 @@ export default function AdminPage() {
         {tab === "Dividends" && <DividendsTab />}
         {tab === "Oversight" && <OversightTab />}
         {tab === "Export" && <ExportTab />}
+        {tab === "Reset" && <ResetTab />}
       </div>
     </div>
   );
@@ -629,6 +630,149 @@ function ExportTab() {
           Snapshots.csv
         </a>
       </div>
+    </div>
+  );
+}
+
+// ── Reset ───────────────────────────────────────────────────────
+
+const RESET_OPTIONS = [
+  {
+    scope: "game" as const,
+    emoji: "🔁",
+    title: "Restart the competition",
+    blurb:
+      "Redo Draft Day with the same teams. Wipes the draft, all trades and portfolios, the race history, badges, theses, and pending dividends. Keeps the kids, their team names, and Coach chats.",
+    confirmWord: "RESTART",
+    button: "Restart the competition",
+    doneText: "Competition reset! Head to Draft Day to run a fresh draft.",
+    doneHref: "/draft",
+    doneLink: "Go to Draft Day →",
+  },
+  {
+    scope: "all" as const,
+    emoji: "🧨",
+    title: "Erase everything",
+    blurb:
+      "Start over from scratch — redo the teams too. Wipes everything above plus the kids, team names, budgets, and Coach chat history. You'll be taken back to Setup.",
+    confirmWord: "ERASE",
+    button: "Erase everything",
+    doneText: "Everything erased. Taking you to Setup…",
+    doneHref: "/setup",
+    doneLink: "Go to Setup →",
+  },
+];
+
+function ResetTab() {
+  return (
+    <div className="mx-auto max-w-2xl space-y-4">
+      <div className="rounded-xl border border-down/40 bg-down/10 px-4 py-3 text-sm text-ink-dim">
+        ⚠️ <span className="font-bold text-ink">Danger zone.</span> These can&apos;t be undone. If you
+        might want the history later, download the CSVs from the Export tab first.
+      </div>
+      {RESET_OPTIONS.map((o) => (
+        <ResetCard key={o.scope} option={o} />
+      ))}
+    </div>
+  );
+}
+
+function ResetCard({ option }: { option: (typeof RESET_OPTIONS)[number] }) {
+  const [armed, setArmed] = useState(false);
+  const [word, setWord] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  const run = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: option.scope }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Reset failed — try again.");
+        return;
+      }
+      setDone(true);
+      if (option.scope === "all") {
+        setTimeout(() => {
+          window.location.href = option.doneHref;
+        }, 1200);
+      }
+    } catch {
+      setError("Reset failed — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="panel p-5">
+        <p className="font-bold text-up">✅ {option.doneText}</p>
+        <a href={option.doneHref} className="mt-2 inline-block text-sm font-bold text-neon underline">
+          {option.doneLink}
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel p-5">
+      <div className="flex items-start gap-3">
+        <span className="text-3xl">{option.emoji}</span>
+        <div className="flex-1">
+          <h2 className="display text-xl font-extrabold">{option.title}</h2>
+          <p className="mt-1 text-sm text-ink-dim">{option.blurb}</p>
+        </div>
+      </div>
+      {!armed ? (
+        <button
+          onClick={() => setArmed(true)}
+          className="mt-4 rounded-xl border border-down/50 px-5 py-2.5 font-bold text-down hover:bg-down/10"
+        >
+          {option.button}…
+        </button>
+      ) : (
+        <div className="mt-4 space-y-3 rounded-xl border border-down/40 bg-down/5 p-4">
+          <p className="text-sm text-ink-dim">
+            Type <span className="font-extrabold tracking-widest text-down">{option.confirmWord}</span>{" "}
+            to confirm:
+          </p>
+          <input
+            value={word}
+            onChange={(e) => setWord(e.target.value)}
+            className="input"
+            placeholder={option.confirmWord}
+            autoFocus
+          />
+          {error && <p className="text-sm font-bold text-down">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={run}
+              disabled={busy || word.trim().toUpperCase() !== option.confirmWord}
+              className="rounded-xl bg-down px-5 py-2.5 font-bold text-night hover:brightness-110 disabled:opacity-40"
+            >
+              {busy ? "Resetting…" : `Yes, ${option.button.toLowerCase()}`}
+            </button>
+            <button
+              onClick={() => {
+                setArmed(false);
+                setWord("");
+                setError("");
+              }}
+              className="rounded-xl bg-panel2 px-5 py-2.5 font-bold text-ink-dim hover:text-ink"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
