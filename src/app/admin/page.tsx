@@ -32,7 +32,6 @@ type Dividend = {
   total: number;
 };
 type Chat = { id: number; kidId: number; role: string; content: string; createdAt: string };
-type Thesis = { id: number; kidId: number; ticker: string; body: string; score: number | null; updatedAt: string };
 type StockRow = { ticker: string; name: string; isBenchmark: boolean };
 
 const TABS = ["Transactions", "Kids", "Dividends", "Oversight", "Export", "Reset"] as const;
@@ -563,7 +562,7 @@ function DividendsTab() {
 // ── Oversight ───────────────────────────────────────────────────
 
 function OversightTab() {
-  const [data, setData] = useState<{ kids: Kid[]; chats: Chat[]; theses: Thesis[] } | null>(null);
+  const [data, setData] = useState<{ kids: Kid[]; chats: Chat[] } | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/oversight").then((r) => r.json()).then(setData);
@@ -573,43 +572,19 @@ function OversightTab() {
   const kidName = (id: number) => data.kids.find((k) => k.id === id);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="panel p-5">
-        <h2 className="display text-xl font-extrabold">Coach chat transcripts</h2>
-        <p className="mt-1 text-sm text-ink-dim">Everything the kids and the Coach have said to each other.</p>
-        <div className="mt-3 max-h-[480px] space-y-2 overflow-y-auto">
-          {data.chats.map((c) => (
-            <div key={c.id} className="rounded-xl border border-edge bg-panel2 px-3 py-2 text-sm">
-              <span className="font-bold">
-                {c.role === "user" ? `${kidName(c.kidId)?.mascot ?? ""} ${kidName(c.kidId)?.name ?? "Kid"}` : "🧢 Coach"}:
-              </span>{" "}
-              <span className="whitespace-pre-wrap text-ink-dim">{c.content}</span>
-            </div>
-          ))}
-          {data.chats.length === 0 && <p className="py-6 text-center text-ink-dim">No chats yet.</p>}
-        </div>
-      </div>
-      <div className="panel p-5">
-        <h2 className="display text-xl font-extrabold">Latest theses</h2>
-        <p className="mt-1 text-sm text-ink-dim">Each kid&apos;s “why I own it” reasoning and Coach scores.</p>
-        <div className="mt-3 max-h-[480px] space-y-2 overflow-y-auto">
-          {data.theses.map((t) => (
-            <div key={t.id} className="rounded-xl border border-edge bg-panel2 px-3 py-2 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="font-bold">
-                  {kidName(t.kidId)?.mascot} {kidName(t.kidId)?.name} on {t.ticker}
-                </span>
-                {t.score != null && (
-                  <span className="ml-auto rounded-full bg-gold/15 px-2 py-0.5 text-xs font-bold text-gold">
-                    {t.score.toFixed(1)}/10
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-ink-dim">{t.body}</p>
-            </div>
-          ))}
-          {data.theses.length === 0 && <p className="py-6 text-center text-ink-dim">No theses written yet.</p>}
-        </div>
+    <div className="panel mx-auto max-w-3xl p-5">
+      <h2 className="display text-xl font-extrabold">Coach chat transcripts</h2>
+      <p className="mt-1 text-sm text-ink-dim">Everything the kids and the Coach have said to each other.</p>
+      <div className="mt-3 max-h-[480px] space-y-2 overflow-y-auto">
+        {data.chats.map((c) => (
+          <div key={c.id} className="rounded-xl border border-edge bg-panel2 px-3 py-2 text-sm">
+            <span className="font-bold">
+              {c.role === "user" ? `${kidName(c.kidId)?.mascot ?? ""} ${kidName(c.kidId)?.name ?? "Kid"}` : "🧢 Coach"}:
+            </span>{" "}
+            <span className="whitespace-pre-wrap text-ink-dim">{c.content}</span>
+          </div>
+        ))}
+        {data.chats.length === 0 && <p className="py-6 text-center text-ink-dim">No chats yet.</p>}
       </div>
     </div>
   );
@@ -642,7 +617,7 @@ const RESET_OPTIONS = [
     emoji: "🔁",
     title: "Restart the competition",
     blurb:
-      "Redo Draft Day with the same teams. Wipes the draft, all trades and portfolios, the race history, badges, theses, and pending dividends. Keeps the kids, their team names, and Coach chats.",
+      "Redo Draft Day with the same teams. Wipes the draft, all trades and portfolios, the race history, badges, and pending dividends. Keeps the kids, their team names, and Coach chats.",
     confirmWord: "RESTART",
     button: "Restart the competition",
     doneText: "Competition reset! Head to Draft Day to run a fresh draft.",

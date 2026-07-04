@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { getDb, kids, stocks, theses } from "@/db";
+import { getDb, kids, stocks } from "@/db";
 import { cachedCoach, coachComplete, fmtMoney, fmtPct } from "./claude";
 import { getNews, getQuotes, getFundamentals } from "./fmp";
 import {
@@ -188,40 +188,6 @@ Pick ${params.pickNumber} (round ${params.round}): ${params.teamName} ${params.m
 If the pick doubles down on a theme (e.g. lots of games or food stocks), call that out playfully. No advice.`,
     { maxTokens: 150 }
   );
-}
-
-/** Score a kid's "why I own it" thesis 1-10 with encouraging feedback. */
-export async function scoreThesis(thesisId: number): Promise<void> {
-  const db = await getDb();
-  const [row] = await db.select().from(theses).where(eq(theses.id, thesisId));
-  if (!row) return;
-  const [stock] = await db.select().from(stocks).where(eq(stocks.ticker, row.ticker));
-  const raw = await coachComplete(
-    `Score this kid's investment thesis for ${stock?.name ?? row.ticker} (${row.ticker}) on a 1-10 scale.
-
-Thesis: "${row.body}"
-
-Rubric (kid-friendly):
-- Does it say how the company makes money? (up to 3 points)
-- Does it mention at least one risk or thing that could go wrong? (up to 3 points)
-- Is it their own reasoning about the business, not just "the stock went up" or "I like it"? (up to 4 points)
-
-Reply in EXACTLY this format:
-SCORE: <number 1-10, can use .5>
-FEEDBACK: <2 sentences: one thing they did well, one specific way to raise their score. Encouraging, kid-friendly.>`,
-    { maxTokens: 200 }
-  );
-  const scoreMatch = raw.match(/SCORE:\s*([\d.]+)/i);
-  const fbMatch = raw.match(/FEEDBACK:\s*([\s\S]+)/i);
-  const score = scoreMatch ? Math.min(10, Math.max(1, parseFloat(scoreMatch[1]))) : null;
-  await db
-    .update(theses)
-    .set({
-      score,
-      feedback: fbMatch ? fbMatch[1].trim() : raw.trim(),
-      scoredAt: new Date(),
-    })
-    .where(eq(theses.id, thesisId));
 }
 
 /** Claude-written kid-friendly company description ("what do they actually do?"). */

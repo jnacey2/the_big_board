@@ -15,18 +15,17 @@ the race — with an AI Coach explaining every move in kid-friendly language.
 - **The Race** — growth-of-$100 chart for every kid plus **Indexo**, a robot
   rival that mirrors every kid trade into SPY so they can see how they stack up
   against "just buying the market."
-- **Three championship belts** — Total Return, Best Risk-Adjusted (Sharpe), and
-  Thesis Champion (Claude grades each kid's one-sentence "why I own it").
+- **Two championship belts** — Total Return and Best Risk-Adjusted (Sharpe).
 - **Portfolio drill-downs** — sector donut, Sharpe/volatility with soccer-team
   risk analogies, per-position P&L, and a "news detective" panel for every
   holding.
 - **Stock deep dives** — price history, revenue/EBITDA/margins/EV/EV-EBITDA
   over time, kid + grown-up investment rationale, and key risks.
 - **Coach everywhere** — daily recaps, weekly recaps, movement summaries, a
-  floating chat drawer, thesis grading, and a first-visit tour. The Coach uses
+  floating chat drawer, and a first-visit tour. The Coach uses
   hedged language ("likely", "may") and never gives buy/sell advice.
 - **Parent HQ** (PIN-gated) — log additional fractional buys/sells, manage kids and
-  budgets, confirm auto-detected dividends, read chat transcripts and theses,
+  budgets, confirm auto-detected dividends, read chat transcripts,
   export CSVs.
 - **Badges, glossary tooltips, confetti,** and a market open/closed chip.
 

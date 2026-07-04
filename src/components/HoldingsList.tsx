@@ -20,18 +20,9 @@ export type HoldingRow = {
 };
 
 type NewsItem = { title: string; url: string; site: string | null; publishedAt: string };
-type Thesis = { ticker: string; body: string; score: number | null; feedback: string | null };
 
-export default function HoldingsList({ holdings, kidId }: { holdings: HoldingRow[]; kidId: number }) {
+export default function HoldingsList({ holdings }: { holdings: HoldingRow[] }) {
   const [openTicker, setOpenTicker] = useState<string | null>(null);
-  const [theses, setTheses] = useState<Map<string, Thesis>>(new Map());
-
-  useEffect(() => {
-    fetch(`/api/thesis?kidId=${kidId}`)
-      .then((r) => r.json())
-      .then((rows: Thesis[]) => setTheses(new Map(rows.map((t) => [t.ticker, t]))))
-      .catch(() => {});
-  }, [kidId]);
 
   return (
     <div className="space-y-2">
@@ -87,7 +78,7 @@ export default function HoldingsList({ holdings, kidId }: { holdings: HoldingRow
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.25 }}
               >
-                <DetectivePanel holding={h} kidId={kidId} thesis={theses.get(h.ticker)} onThesis={(t) => setTheses((m) => new Map(m).set(h.ticker, t))} />
+                <DetectivePanel holding={h} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -100,17 +91,7 @@ export default function HoldingsList({ holdings, kidId }: { holdings: HoldingRow
   );
 }
 
-function DetectivePanel({
-  holding,
-  kidId,
-  thesis,
-  onThesis,
-}: {
-  holding: HoldingRow;
-  kidId: number;
-  thesis?: Thesis;
-  onThesis: (t: Thesis) => void;
-}) {
+function DetectivePanel({ holding }: { holding: HoldingRow }) {
   const [news, setNews] = useState<NewsItem[] | null>(null);
 
   useEffect(() => {
@@ -162,94 +143,6 @@ function DetectivePanel({
           ))}
         </ul>
       </div>
-
-      <ThesisBox kidId={kidId} ticker={holding.ticker} thesis={thesis} onThesis={onThesis} />
-    </div>
-  );
-}
-
-export function ThesisBox({
-  kidId,
-  ticker,
-  thesis,
-  onThesis,
-}: {
-  kidId: number;
-  ticker: string;
-  thesis?: Thesis;
-  onThesis: (t: Thesis) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [body, setBody] = useState(thesis?.body ?? "");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => setBody(thesis?.body ?? ""), [thesis?.body]);
-
-  const save = async () => {
-    if (!body.trim()) return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/thesis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kidId, ticker, body }),
-      });
-      if (res.ok) {
-        onThesis(await res.json());
-        setEditing(false);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-gold/25 bg-gold/5 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-extrabold uppercase tracking-wider text-gold">
-          🧠 Why I own it
-        </span>
-        {thesis?.score != null && (
-          <span className="rounded-full bg-gold/15 px-2 py-0.5 text-xs font-bold text-gold">
-            {thesis.score.toFixed(1)}/10
-          </span>
-        )}
-        {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="ml-auto text-xs font-bold text-ink-dim hover:text-ink"
-          >
-            {thesis ? "Edit & re-score" : "Write it → earn Thesis points"}
-          </button>
-        )}
-      </div>
-      {!editing && thesis && <p className="mt-1.5 text-sm">{thesis.body}</p>}
-      {!editing && thesis?.feedback && (
-        <p className="mt-1.5 text-xs italic text-ink-dim">🧢 {thesis.feedback}</p>
-      )}
-      {editing && (
-        <div className="mt-2 space-y-2">
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={3}
-            className="input resize-none"
-            placeholder="How does this company make money? Why do you like it? What could go wrong?"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={save}
-              disabled={busy || !body.trim()}
-              className="rounded-full bg-gold px-4 py-1.5 text-xs font-extrabold text-night disabled:opacity-40"
-            >
-              {busy ? "Coach is grading…" : "Save & get scored"}
-            </button>
-            <button onClick={() => setEditing(false)} className="rounded-full px-3 py-1.5 text-xs text-ink-dim hover:text-ink">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

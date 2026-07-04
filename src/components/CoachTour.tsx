@@ -17,7 +17,7 @@ export default function CoachTour({ kidNames }: { kidNames: string[] }) {
     {
       emoji: "🧢",
       title: `Welcome, ${names}!`,
-      body: "I'm the Coach. Welcome to The Big Board — your very own stock market competition with real money, real companies, and three ways to win.",
+      body: "I'm the Coach. Welcome to The Big Board — your very own stock market competition with real money, real companies, and two ways to win.",
     },
     {
       emoji: "🎤",
@@ -26,8 +26,8 @@ export default function CoachTour({ kidNames }: { kidNames: string[] }) {
     },
     {
       emoji: "🏆",
-      title: "Three Championship Belts",
-      body: "Total Return Champion goes to the biggest gains. Best Risk-Adjusted Investor rewards being smart AND careful. Thesis Champion goes to whoever explains their picks best — the robot can't win that one!",
+      title: "Two Championship Belts",
+      body: "Total Return Champion goes to the biggest gains. Best Risk-Adjusted Investor rewards being smart AND careful — because careful beats lucky.",
     },
     {
       emoji: "🤖",

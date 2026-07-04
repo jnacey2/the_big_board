@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { badges, getDb, kids as kidsTable } from "@/db";
 import { getCompetitors, getRaceData } from "@/lib/scoreboard";
 import { checkBadges } from "@/lib/badges";
@@ -51,8 +51,6 @@ export default async function Dashboard() {
       sinceStartReturnPct: c.stats.sinceStartReturnPct,
       riskLabel: c.stats.riskLabel,
       sharpe: c.stats.sharpe,
-      thesisScore: c.thesisScore,
-      thesisCount: c.thesisCount,
       totalValue: c.portfolio.totalValue,
     }));
 

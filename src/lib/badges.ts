@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { badges, getDb, snapshots, theses, transactions } from "@/db";
+import { badges, getDb, snapshots, transactions } from "@/db";
 import { getPortfolio, getStats, sectorBreakdown, type Portfolio } from "./portfolio";
 
 type BadgeDef = { code: string; name: string; description: string; emoji: string };
@@ -47,12 +47,6 @@ const DEFS: Record<string, BadgeDef> = {
     description: "Own 5 or more stocks at once.",
     emoji: "🃏",
   },
-  thesis_master: {
-    code: "thesis_master",
-    name: "Thesis Master",
-    description: "Average thesis score of 8+ from the Coach.",
-    emoji: "🧠",
-  },
   diamond_hands: {
     code: "diamond_hands",
     name: "Diamond Hands",
@@ -95,13 +89,6 @@ export async function checkBadges(kidId: number, portfolio?: Portfolio): Promise
     const last = snaps[snaps.length - 1];
     const maxBefore = Math.max(...snaps.slice(0, -1).map((s) => s.value));
     if (last.value > maxBefore) await award(kidId, "all_time_high");
-  }
-
-  const thesisRows = await db.select().from(theses).where(eq(theses.kidId, kidId));
-  const scored = thesisRows.filter((t) => t.score != null);
-  if (scored.length >= 3) {
-    const avg = scored.reduce((s, t) => s + (t.score ?? 0), 0) / scored.length;
-    if (avg >= 8) await award(kidId, "thesis_master");
   }
 
   // Diamond hands: a currently-held position whose price dipped >=10% below

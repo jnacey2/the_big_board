@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
   await db.delete(snapshots);
   await db.delete(pendingDividends);
   await db.delete(badges);
+  // The thesis feature was removed from the app, but the table (and any legacy
+  // rows) still exists — clear it so deleting `kids` below can't hit its FK.
   await db.delete(theses);
   // Portfolio-derived Coach commentary is keyed per kid and day, so the same
   // kid would see stale pre-reset commentary until tomorrow — drop those.

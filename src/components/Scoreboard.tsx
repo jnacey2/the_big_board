@@ -15,15 +15,12 @@ export type ScoreRow = {
   sinceStartReturnPct: number | null;
   riskLabel: string | null;
   sharpe: number | null;
-  thesisScore: number | null;
-  thesisCount: number;
   totalValue: number;
 };
 
 const BELTS = [
   { key: "return", label: "🏆 Total Return Champion", sub: "Highest return since the start" },
   { key: "sharpe", label: "🛡️ Best Risk-Adjusted Investor", sub: "Best Sharpe ratio — careful beats lucky" },
-  { key: "thesis", label: "🧠 Thesis Champion", sub: "Best explanations of WHY they own it" },
 ] as const;
 
 export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
@@ -31,8 +28,7 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
 
   const ranked = [...rows].sort((a, b) => {
     if (belt === "return") return (b.sinceStartReturnPct ?? -1e9) - (a.sinceStartReturnPct ?? -1e9);
-    if (belt === "sharpe") return (b.sharpe ?? -1e9) - (a.sharpe ?? -1e9);
-    return (b.thesisScore ?? -1) - (a.thesisScore ?? -1);
+    return (b.sharpe ?? -1e9) - (a.sharpe ?? -1e9);
   });
 
   const active = BELTS.find((b) => b.key === belt)!;
@@ -64,7 +60,6 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
               <th className="px-2 py-2 text-right">Since Start</th>
               <th className="px-2 py-2 text-center">Risk</th>
               <th className="px-2 py-2 text-right">Sharpe</th>
-              <th className="px-2 py-2 text-right">Thesis</th>
             </tr>
           </thead>
           <tbody>
@@ -127,17 +122,6 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
                 </td>
                 <td className="px-2 py-3 text-right tabular">
                   {r.sharpe != null ? r.sharpe.toFixed(2) : "—"}
-                </td>
-                <td className="px-2 py-3 text-right tabular">
-                  {r.kind === "robot" ? (
-                    <span className="text-ink-dim" title="Robots can't think — no thesis, no points!">
-                      0 🤐
-                    </span>
-                  ) : r.thesisScore != null ? (
-                    <span className="font-bold text-gold">{r.thesisScore.toFixed(1)}/10</span>
-                  ) : (
-                    <span className="text-ink-dim">—</span>
-                  )}
                 </td>
               </motion.tr>
             ))}

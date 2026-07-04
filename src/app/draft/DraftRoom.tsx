@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import ScoutingCard, { type StockCard } from "./ScoutingCard";
-import { ThesisBox } from "@/components/HoldingsList";
 import type { ExecutedTeam } from "@/app/api/draft/execute/route";
 
 type Kid = { id: number; kind: string; name: string; teamName: string; mascot: string; color: string };
@@ -45,7 +43,6 @@ export default function DraftRoom() {
   const [picks, setPicks] = useState<Pick[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [thesisFor, setThesisFor] = useState<{ kidId: number; ticker: string; name: string } | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -91,11 +88,9 @@ export default function DraftRoom() {
         setError(data.error ?? "Pick failed");
         return;
       }
-      const stock = stocks.find((s) => s.ticker === ticker);
       confetti({ particleCount: 80, spread: 70, origin: { y: 0.35 } });
       setPicks((p) => [...p, data.pick]);
       setDraft((d) => (d ? { ...d, currentPick: d.currentPick + 1, status: data.done ? "done" : "live" } : d));
-      setThesisFor({ kidId: data.pick.kidId, ticker, name: stock?.name ?? ticker });
       if (data.done) {
         setTimeout(() => {
           confetti({ particleCount: 220, spread: 120, origin: { y: 0.5 } });
@@ -153,7 +148,6 @@ export default function DraftRoom() {
         <div className="text-center">
           <DraftSetupButton onCreated={load} />
         </div>
-        <ThesisModal thesisFor={thesisFor} onClose={() => setThesisFor(null)} />
       </div>
     );
   }
@@ -206,8 +200,6 @@ export default function DraftRoom() {
           </button>
         </div>
       </div>
-
-      <ThesisModal thesisFor={thesisFor} onClose={() => setThesisFor(null)} />
     </div>
   );
 }
@@ -572,59 +564,6 @@ function CommentaryFeed({ picks, kids, stocks }: { picks: Pick[]; kids: Kid[]; s
         )}
       </div>
     </div>
-  );
-}
-
-// ── Thesis modal after each pick ────────────────────────────────
-
-function ThesisModal({
-  thesisFor,
-  onClose,
-}: {
-  thesisFor: { kidId: number; ticker: string; name: string } | null;
-  onClose: () => void;
-}) {
-  // Portal to <body>: ancestor `animate-fade-up` keeps a transform (fill-mode)
-  // which would otherwise turn position:fixed into position-relative-to-it.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
-  return createPortal(
-    <AnimatePresence>
-      {thesisFor && (
-        <motion.div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
-          <motion.div
-            initial={{ scale: 0.92, y: 12 }}
-            animate={{ scale: 1, y: 0 }}
-            exit={{ scale: 0.92, opacity: 0 }}
-            className="panel w-full max-w-md p-6"
-          >
-            <h3 className="display text-xl font-extrabold">Great pick! 🎉</h3>
-            <p className="mt-1 text-sm text-ink-dim">
-              One sentence: WHY did you pick {thesisFor.name}? (This earns Thesis Champion points — the
-              robot can&apos;t do this part!)
-            </p>
-            <div className="mt-3">
-              <ThesisBox
-                kidId={thesisFor.kidId}
-                ticker={thesisFor.ticker}
-                thesis={undefined}
-                onThesis={() => setTimeout(onClose, 1500)}
-              />
-            </div>
-            <button onClick={onClose} className="mt-3 w-full rounded-xl bg-panel2 py-2.5 text-sm font-bold text-ink-dim hover:text-ink">
-              Skip for now
-            </button>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body
   );
 }
 

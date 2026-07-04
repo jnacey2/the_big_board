@@ -146,7 +146,7 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
             Tap 🕵️ Detective to see why a stock is moving
           </span>
         </div>
-        <HoldingsList holdings={holdings} kidId={kidId} />
+        <HoldingsList holdings={holdings} />
       </section>
 
       {/* Weekly recap */}
