@@ -218,6 +218,39 @@ function ExecutePortfolios({ draft, onExecuted }: { draft: Draft; onExecuted: ()
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [teams, setTeams] = useState<ExecutedTeam[] | null>(null);
+  const [admin, setAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/me")
+      .then((r) => r.json())
+      .then((d) => setAdmin(Boolean(d.admin)))
+      .catch(() => {});
+  }, []);
+
+  const undo = async () => {
+    if (busy) return;
+    if (!confirm("Undo the draft buys? All auto-bought positions (and the robot's mirrors) are removed and you can buy again at fresh prices.")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/draft/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Undo failed — try again.");
+        return;
+      }
+      setTeams(null);
+      onExecuted();
+    } catch {
+      setError("Undo failed — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const run = async () => {
     if (busy) return;
@@ -291,6 +324,18 @@ function ExecutePortfolios({ draft, onExecuted }: { draft: Draft; onExecuted: ()
         <Link href="/" className="mt-3 inline-block text-sm font-bold text-neon underline">
           Watch the race →
         </Link>
+        {admin && (
+          <div className="mt-3 border-t border-edge pt-3">
+            <button
+              onClick={undo}
+              disabled={busy}
+              className="text-xs font-bold text-ink-dim underline hover:text-down disabled:opacity-40"
+            >
+              {busy ? "Undoing…" : "↩︎ Undo draft buys (parent)"}
+            </button>
+            {error && <p className="mt-2 text-xs font-bold text-down">{error}</p>}
+          </div>
+        )}
       </div>
     );
   }

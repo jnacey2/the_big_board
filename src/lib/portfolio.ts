@@ -1,7 +1,7 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { getDb, kids, snapshots, stocks, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
-import { isMarketDay, lastCompletedMarketDay } from "./market";
+import { etDateStr, isMarketDay, lastCompletedMarketDay } from "./market";
 
 export const RISK_FREE_RATE = 0.045;
 
@@ -107,6 +107,19 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
   ]);
   const stockByTicker = new Map(stockRows.map((s) => [s.ticker, s]));
 
+  // Shares bought today (and what was paid for them), per ticker. Day change
+  // for those shares is measured from the purchase price, not prevClose — a
+  // kid who bought at 11am shouldn't be shown the stock's full daily move.
+  const today = etDateStr();
+  const todayBuyShares = new Map<string, number>();
+  const todayBuyCost = new Map<string, number>();
+  for (const tx of txs) {
+    if (tx.type === "buy" && tx.tradeDate === today) {
+      todayBuyShares.set(tx.ticker, (todayBuyShares.get(tx.ticker) ?? 0) + tx.shares);
+      todayBuyCost.set(tx.ticker, (todayBuyCost.get(tx.ticker) ?? 0) + tx.amount);
+    }
+  }
+
   const positions: Position[] = held.map(([ticker, n]) => {
     const q = quoteMap.get(ticker);
     const st = stockByTicker.get(ticker);
@@ -116,7 +129,18 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
     const prevClose = q?.prevClose ?? null;
     const cb = costBasis.get(ticker) ?? 0;
     const value = n * price;
-    const dayChange = prevClose != null ? (price - prevClose) * n : 0;
+    // Split today's move: shares held overnight move from prevClose; shares
+    // bought today move from what was actually paid for them.
+    const boughtToday = Math.min(todayBuyShares.get(ticker) ?? 0, n);
+    const overnight = n - boughtToday;
+    const buyCost =
+      boughtToday > 0
+        ? (todayBuyCost.get(ticker) ?? 0) * (boughtToday / (todayBuyShares.get(ticker) ?? 1))
+        : 0;
+    const dayChange =
+      (prevClose != null ? (price - prevClose) * overnight : 0) +
+      (price * boughtToday - buyCost);
+    const dayBase = (prevClose ?? 0) * overnight + buyCost;
     return {
       ticker,
       name: st?.name ?? ticker,
@@ -130,8 +154,7 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
       prevClose,
       value,
       dayChange,
-      dayChangePct:
-        prevClose != null && prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+      dayChangePct: dayBase > 0 ? (dayChange / dayBase) * 100 : 0,
       unrealizedPnl: value - cb,
       unrealizedPnlPct: cb > 0 ? ((value - cb) / cb) * 100 : 0,
     };
