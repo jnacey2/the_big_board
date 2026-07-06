@@ -1,7 +1,7 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { getDb, kids, snapshots, stocks, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
-import { etDateStr, isMarketDay, lastCompletedMarketDay } from "./market";
+import { isMarketDay, lastCompletedMarketDay } from "./market";
 
 export const RISK_FREE_RATE = 0.045;
 
@@ -107,16 +107,23 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
   ]);
   const stockByTicker = new Map(stockRows.map((s) => [s.ticker, s]));
 
-  // Shares bought today (and what was paid for them), per ticker. Day change
-  // for those shares is measured from the purchase price, not prevClose — a
-  // kid who bought at 11am shouldn't be shown the stock's full daily move.
-  const today = etDateStr();
-  const todayBuyShares = new Map<string, number>();
-  const todayBuyCost = new Map<string, number>();
+  // Day-change baseline rule: shares bought AFTER the last completed market
+  // session haven't lived through a close yet, so their "today" move is
+  // measured from what was actually paid — not from the quote's prevClose.
+  // This covers buys made today, over a weekend, or on a holiday: until the
+  // market trades again, the quote still equals the purchase price, so day
+  // change reads exactly 0; once the next session opens, it shows movement
+  // since purchase. After the position has lived through a full session,
+  // prevClose behaves normally. Positions mixing fresh and older shares are
+  // approximated per-bucket: fresh shares at their aggregate buy price,
+  // older shares at prevClose.
+  const lastSession = lastCompletedMarketDay();
+  const freshBuyShares = new Map<string, number>();
+  const freshBuyCost = new Map<string, number>();
   for (const tx of txs) {
-    if (tx.type === "buy" && tx.tradeDate === today) {
-      todayBuyShares.set(tx.ticker, (todayBuyShares.get(tx.ticker) ?? 0) + tx.shares);
-      todayBuyCost.set(tx.ticker, (todayBuyCost.get(tx.ticker) ?? 0) + tx.amount);
+    if (tx.type === "buy" && tx.tradeDate > lastSession) {
+      freshBuyShares.set(tx.ticker, (freshBuyShares.get(tx.ticker) ?? 0) + tx.shares);
+      freshBuyCost.set(tx.ticker, (freshBuyCost.get(tx.ticker) ?? 0) + tx.amount);
     }
   }
 
@@ -129,18 +136,18 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
     const prevClose = q?.prevClose ?? null;
     const cb = costBasis.get(ticker) ?? 0;
     const value = n * price;
-    // Split today's move: shares held overnight move from prevClose; shares
-    // bought today move from what was actually paid for them.
-    const boughtToday = Math.min(todayBuyShares.get(ticker) ?? 0, n);
-    const overnight = n - boughtToday;
+    // Split today's move: shares that have lived through a market close move
+    // from prevClose; freshly bought shares move from what was paid for them.
+    const fresh = Math.min(freshBuyShares.get(ticker) ?? 0, n);
+    const seasoned = n - fresh;
     const buyCost =
-      boughtToday > 0
-        ? (todayBuyCost.get(ticker) ?? 0) * (boughtToday / (todayBuyShares.get(ticker) ?? 1))
+      fresh > 0
+        ? (freshBuyCost.get(ticker) ?? 0) * (fresh / (freshBuyShares.get(ticker) ?? 1))
         : 0;
     const dayChange =
-      (prevClose != null ? (price - prevClose) * overnight : 0) +
-      (price * boughtToday - buyCost);
-    const dayBase = (prevClose ?? 0) * overnight + buyCost;
+      (prevClose != null ? (price - prevClose) * seasoned : 0) +
+      (price * fresh - buyCost);
+    const dayBase = (prevClose ?? 0) * seasoned + buyCost;
     return {
       ticker,
       name: st?.name ?? ticker,
