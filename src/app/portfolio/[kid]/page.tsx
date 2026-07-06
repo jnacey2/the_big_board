@@ -39,6 +39,7 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
     avgCost: p.avgCost,
     price: p.price,
     value: p.value,
+    dayChange: p.dayChange,
     dayChangePct: p.dayChangePct,
     unrealizedPnl: p.unrealizedPnl,
     unrealizedPnlPct: p.unrealizedPnlPct,

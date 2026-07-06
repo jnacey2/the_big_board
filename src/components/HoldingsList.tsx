@@ -14,6 +14,7 @@ export type HoldingRow = {
   avgCost: number;
   price: number;
   value: number;
+  dayChange: number;
   dayChangePct: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
@@ -26,48 +27,61 @@ export default function HoldingsList({ holdings }: { holdings: HoldingRow[] }) {
 
   return (
     <div className="space-y-2">
-      {holdings.map((h) => (
+      {holdings.map((h) => {
+        const up = h.dayChangePct >= 0;
+        const perShareChange = h.shares > 0 ? h.dayChange / h.shares : 0;
+        return (
         <div key={h.ticker} className="overflow-hidden rounded-2xl border border-edge bg-panel2/50">
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            {h.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={h.logoUrl} alt="" className="h-10 w-10 rounded-xl bg-white/90 object-contain p-1" />
-            ) : (
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-panel text-xs font-bold">
-                {h.ticker.slice(0, 3)}
+          <div className="px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {h.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={h.logoUrl} alt="" className="h-10 w-10 rounded-xl bg-white/90 object-contain p-1" />
+              ) : (
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-panel text-xs font-bold">
+                  {h.ticker.slice(0, 3)}
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <Link href={`/stock/${h.ticker}`} className="font-extrabold hover:underline">
+                  {h.name}
+                </Link>
+                <div className="text-xs text-ink-dim">{h.ticker}</div>
+              </div>
+              <div className="text-right">
+                <div className="display text-lg font-extrabold tabular leading-tight">
+                  ${h.price.toFixed(2)}
+                </div>
+                <div className={`text-sm font-bold tabular ${up ? "text-up" : "text-down"}`}>
+                  {up ? "▲" : "▼"} {up ? "+" : "−"}${Math.abs(perShareChange).toFixed(2)} ·{" "}
+                  {up ? "+" : "−"}{Math.abs(h.dayChangePct).toFixed(2)}% today
+                </div>
+              </div>
+              <button
+                onClick={() => setOpenTicker(openTicker === h.ticker ? null : h.ticker)}
+                className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
+                  openTicker === h.ticker ? "bg-neon text-night" : "bg-panel text-ink-dim hover:text-ink"
+                }`}
+              >
+                🕵️ Detective
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-edge/40 pt-2 text-xs text-ink-dim tabular">
+              <span>
+                Value <span className="font-bold text-ink/80">${h.value.toFixed(2)}</span>
               </span>
-            )}
-            <div className="min-w-0 flex-1">
-              <Link href={`/stock/${h.ticker}`} className="font-extrabold hover:underline">
-                {h.name}
-              </Link>
-              <div className="text-xs text-ink-dim">
+              <span>
                 {h.shares.toFixed(4)} shares · avg ${h.avgCost.toFixed(2)}
-              </div>
+              </span>
+              <span className="ml-auto">
+                P&amp;L{" "}
+                <span className={`font-bold ${h.unrealizedPnl >= 0 ? "text-up/80" : "text-down/80"}`}>
+                  {h.unrealizedPnl >= 0 ? "+" : "−"}${Math.abs(h.unrealizedPnl).toFixed(2)} (
+                  {h.unrealizedPnlPct >= 0 ? "+" : ""}
+                  {h.unrealizedPnlPct.toFixed(1)}%)
+                </span>
+              </span>
             </div>
-            <div className="text-right">
-              <div className="font-extrabold tabular">${h.value.toFixed(2)}</div>
-              <div className={`text-xs font-bold tabular ${h.dayChangePct >= 0 ? "text-up" : "text-down"}`}>
-                {h.dayChangePct >= 0 ? "▲" : "▼"} {Math.abs(h.dayChangePct).toFixed(2)}% today
-              </div>
-            </div>
-            <div className="text-right">
-              <div className={`font-bold tabular ${h.unrealizedPnl >= 0 ? "text-up" : "text-down"}`}>
-                {h.unrealizedPnl >= 0 ? "+" : "−"}${Math.abs(h.unrealizedPnl).toFixed(2)}
-              </div>
-              <div className={`text-xs tabular ${h.unrealizedPnlPct >= 0 ? "text-up" : "text-down"}`}>
-                {h.unrealizedPnlPct >= 0 ? "+" : ""}
-                {h.unrealizedPnlPct.toFixed(1)}% overall
-              </div>
-            </div>
-            <button
-              onClick={() => setOpenTicker(openTicker === h.ticker ? null : h.ticker)}
-              className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${
-                openTicker === h.ticker ? "bg-neon text-night" : "bg-panel text-ink-dim hover:text-ink"
-              }`}
-            >
-              🕵️ Detective
-            </button>
           </div>
 
           <AnimatePresence>
@@ -83,7 +97,8 @@ export default function HoldingsList({ holdings }: { holdings: HoldingRow[] }) {
             )}
           </AnimatePresence>
         </div>
-      ))}
+        );
+      })}
       {holdings.length === 0 && (
         <p className="py-10 text-center text-ink-dim">No holdings yet — time to draft and buy!</p>
       )}
