@@ -66,6 +66,25 @@ export default function DraftRoom() {
     load();
   }, [load]);
 
+  // Refresh quotes every 60s while the market is open (single bulk call).
+  useEffect(() => {
+    if (stocks.length === 0) return;
+    const tickers = stocks.map((s) => s.ticker).join(",");
+    const tick = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const market = await fetch("/api/market").then((r) => r.json());
+        if (!market.open) return;
+        const rows: Quote[] = await fetch(`/api/quotes?tickers=${tickers}`).then((r) => r.json());
+        setQuotes(new Map(rows.map((q) => [q.ticker, q])));
+      } catch {
+        /* offline is fine */
+      }
+    };
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, [stocks]);
+
   const live = draft?.status === "live";
   const order = useMemo(() => (draft?.kidOrder as number[]) ?? [], [draft]);
   const totalPicks = draft ? draft.rounds * order.length : 0;

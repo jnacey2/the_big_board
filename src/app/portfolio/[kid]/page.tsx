@@ -9,6 +9,7 @@ import HoldingsList, { type HoldingRow } from "@/components/HoldingsList";
 import SectorDonut from "@/components/SectorDonut";
 import NumberTicker from "@/components/NumberTicker";
 import Term from "@/components/Glossary";
+import AutoRefresh from "@/components/AutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
 
   return (
     <div className="animate-fade-up space-y-6" style={{ "--glow": kid.color } as React.CSSProperties}>
+      <AutoRefresh />
       {/* Team header */}
       <div className="flex flex-wrap items-center gap-4">
         <span

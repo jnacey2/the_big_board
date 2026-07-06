@@ -10,7 +10,7 @@ import {
 import { isMarketOpen } from "./market";
 
 const BASE = "https://financialmodelingprep.com/api/v3";
-const QUOTE_TTL_OPEN_MS = 15 * 60 * 1000; // 15 min during market hours
+const QUOTE_TTL_OPEN_MS = 60 * 1000; // 1 min during market hours (one bulk /quote call per refresh)
 const QUOTE_TTL_CLOSED_MS = 6 * 60 * 60 * 1000; // 6h when closed
 const NEWS_TTL_MS = 30 * 60 * 1000;
 
@@ -58,7 +58,7 @@ type FmpQuote = {
   previousClose: number;
 };
 
-/** Get quotes for tickers, refreshing any that are stale (15-min TTL when market open). */
+/** Get quotes for tickers, refreshing any that are stale (1-min TTL when market open, 6h when closed). */
 export async function getQuotes(tickers: string[]): Promise<Map<string, Quote>> {
   if (tickers.length === 0) return new Map();
   const db = await getDb();

@@ -9,6 +9,7 @@ import Scoreboard, { type ScoreRow } from "@/components/Scoreboard";
 import CoachCommentary from "@/components/coach/CoachCommentary";
 import NumberTicker from "@/components/NumberTicker";
 import CoachTour from "@/components/CoachTour";
+import AutoRefresh from "@/components/AutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,7 @@ export default async function Dashboard() {
 
   return (
     <div className="animate-fade-up space-y-6">
+      <AutoRefresh />
       <CoachTour kidNames={kidNames} />
 
       {/* Hero cards */}
