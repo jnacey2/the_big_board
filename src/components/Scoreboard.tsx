@@ -117,11 +117,11 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
                       {r.riskLabel}
                     </span>
                   ) : (
-                    <span className="text-ink-dim">—</span>
+                    <WarmingUp />
                   )}
                 </td>
                 <td className="px-2 py-3 text-right tabular">
-                  {r.sharpe != null ? r.sharpe.toFixed(2) : "—"}
+                  {r.sharpe != null ? r.sharpe.toFixed(2) : <WarmingUp align="right" />}
                 </td>
               </motion.tr>
             ))}
@@ -129,6 +129,24 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Risk and Sharpe need several days of return history before they mean
+ * anything, so early on we show a friendly "warming up" pill instead of a
+ * bare dash.
+ */
+function WarmingUp({ align }: { align?: "right" }) {
+  return (
+    <span
+      title="Needs about a week of trading days to calculate"
+      className={`inline-flex cursor-help items-center gap-1 text-xs text-ink-dim ${
+        align === "right" ? "justify-end" : ""
+      }`}
+    >
+      ⏳ warming up
+    </span>
   );
 }
 

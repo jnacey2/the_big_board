@@ -24,7 +24,8 @@ export async function getCompetitors(): Promise<Competitor[]> {
   const rows = await db.select().from(kids).orderBy(asc(kids.id));
   const out: Competitor[] = [];
   for (const k of rows) {
-    const [portfolio, stats] = await Promise.all([getPortfolio(k.id), getStats(k.id)]);
+    const portfolio = await getPortfolio(k.id);
+    const stats = await getStats(k.id, portfolio);
     out.push({
       id: k.id,
       kind: k.kind,

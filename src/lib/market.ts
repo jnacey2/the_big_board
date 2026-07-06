@@ -66,6 +66,15 @@ export function isMarketOpen(date: Date = new Date()): boolean {
   return mins >= 9 * 60 + 30 && mins < 16 * 60;
 }
 
+/** YYYY-MM-DD of the Monday of the current week, in ET. */
+export function startOfWeekEt(date: Date = new Date()): string {
+  const p = etNow(date);
+  const cursor = new Date(Date.UTC(p.y, p.m - 1, p.d, 12));
+  const daysSinceMonday = (p.weekday + 6) % 7;
+  cursor.setUTCDate(cursor.getUTCDate() - daysSinceMonday);
+  return cursor.toISOString().slice(0, 10);
+}
+
 /** Most recent completed market day (yesterday-or-earlier trading day, ET). */
 export function lastCompletedMarketDay(date: Date = new Date()): string {
   const p = etNow(date);

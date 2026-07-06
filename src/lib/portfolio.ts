@@ -1,7 +1,7 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb, kids, snapshots, stocks, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
-import { isMarketDay, lastCompletedMarketDay } from "./market";
+import { isMarketDay, lastCompletedMarketDay, startOfWeekEt } from "./market";
 
 export const RISK_FREE_RATE = 0.045;
 
@@ -31,6 +31,7 @@ export type Portfolio = {
   totalValue: number;
   invested: number; // net dollars deployed (buys - sells - dividends received)
   startingBudget: number;
+  contributions: number; // outside money in: starting budget + deposits
   dayChange: number;
   dayChangePct: number;
   totalReturnPct: number; // vs net contributions
@@ -191,6 +192,7 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
     totalValue,
     invested,
     startingBudget: kid.startingBudget,
+    contributions,
     dayChange,
     dayChangePct: prevTotal > 0 ? (dayChange / prevTotal) * 100 : 0,
     totalReturnPct:
@@ -327,15 +329,36 @@ export async function getReturnSeries(
   kidId: number
 ): Promise<{ date: string; index: number }[]> {
   const db = await getDb();
+  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
   const snaps = await db
     .select()
     .from(snapshots)
     .where(eq(snapshots.kidId, kidId))
     .orderBy(asc(snapshots.snapDate));
-  if (snaps.length === 0) return [];
+  if (!kid || snaps.length === 0) return [];
   const { dates, returns } = await getDailyReturns(kidId);
-  const series = [{ date: snaps[0].snapDate, index: 100 }];
-  let idx = 100;
+
+  // Anchor the race at a synthetic 0% "start" point the day before the first
+  // snapshot, and value the first snapshot against the money put in by then
+  // (starting budget + deposits). Day one then draws a real line segment —
+  // not a single floating dot — and the whole series lines up with the
+  // "since start" numbers on the scoreboard.
+  const txs = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.kidId, kidId));
+  const baseContrib =
+    kid.startingBudget +
+    txs
+      .filter((t) => t.type === "deposit" && t.tradeDate <= snaps[0].snapDate)
+      .reduce((s, t) => s + t.amount, 0);
+
+  const originDate = new Date(`${snaps[0].snapDate}T12:00:00Z`);
+  originDate.setUTCDate(originDate.getUTCDate() - 1);
+
+  const series = [{ date: originDate.toISOString().slice(0, 10), index: 100 }];
+  let idx = baseContrib > 0 ? (snaps[0].value / baseContrib) * 100 : 100;
+  series.push({ date: snaps[0].snapDate, index: idx });
   for (let i = 0; i < dates.length; i++) {
     idx *= 1 + returns[i];
     series.push({ date: dates[i], index: idx });
@@ -343,15 +366,61 @@ export async function getReturnSeries(
   return series;
 }
 
-export async function getStats(kidId: number): Promise<PortfolioStats> {
+/**
+ * This-week return, computed live so it shows from day one.
+ *
+ * Rule: current total value vs. the last end-of-day snapshot BEFORE this
+ * week (Monday ET). Deposits made this week are subtracted from current
+ * value so outside money doesn't count as return. In week one there is no
+ * pre-week snapshot, so the baseline falls back to net contributions
+ * (starting budget + deposits) — i.e. This Week equals Since Start until
+ * the first full week of snapshots exists.
+ */
+async function getWeekReturnPct(kidId: number, p: Portfolio): Promise<number | null> {
+  const db = await getDb();
+  const weekStart = startOfWeekEt();
+  const [baseline] = await db
+    .select()
+    .from(snapshots)
+    .where(and(eq(snapshots.kidId, kidId), lt(snapshots.snapDate, weekStart)))
+    .orderBy(desc(snapshots.snapDate))
+    .limit(1);
+
+  if (baseline) {
+    if (baseline.value <= 0) return null;
+    const txs = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.kidId, kidId));
+    const depositsThisWeek = txs
+      .filter((t) => t.type === "deposit" && t.tradeDate >= weekStart)
+      .reduce((s, t) => s + t.amount, 0);
+    return ((p.totalValue - depositsThisWeek) / baseline.value - 1) * 100;
+  }
+  // Week one: This Week == Since Start.
+  return p.contributions > 0 ? p.totalReturnPct : null;
+}
+
+export async function getStats(kidId: number, portfolio?: Portfolio): Promise<PortfolioStats> {
+  const p = portfolio ?? (await getPortfolio(kidId));
+
+  // Since Start never needs snapshot history: it's live value vs. what was
+  // put in (starting budget + deposits), available from the first buy.
+  const hasStarted = p.invested > 0 || p.positions.length > 0;
+  const sinceStartReturnPct = hasStarted ? p.totalReturnPct : null;
+  const weekReturnPct = hasStarted ? await getWeekReturnPct(kidId, p) : null;
+
+  // Risk and Sharpe genuinely need a series of day-over-day returns between
+  // snapshots, so they stay null (the UI shows a "warming up" hint) until
+  // there are at least two daily return observations (~3 market days).
   const { returns: rets } = await getDailyReturns(kidId);
   if (rets.length < 2) {
     return {
       volatilityAnnualPct: null,
       sharpe: null,
       riskLabel: null,
-      weekReturnPct: null,
-      sinceStartReturnPct: null,
+      weekReturnPct,
+      sinceStartReturnPct,
     };
   }
 
@@ -366,16 +435,12 @@ export async function getStats(kidId: number): Promise<PortfolioStats> {
   const riskLabel: PortfolioStats["riskLabel"] =
     annualVol < 0.15 ? "Low" : annualVol < 0.28 ? "Medium" : "High";
 
-  const weekRets = rets.slice(-5);
-  const weekReturn = weekRets.reduce((acc, r) => acc * (1 + r), 1) - 1;
-  const totalReturn = rets.reduce((acc, r) => acc * (1 + r), 1) - 1;
-
   return {
     volatilityAnnualPct: annualVol * 100,
     sharpe,
     riskLabel,
-    weekReturnPct: weekReturn * 100,
-    sinceStartReturnPct: totalReturn * 100,
+    weekReturnPct,
+    sinceStartReturnPct,
   };
 }
 
