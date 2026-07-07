@@ -48,6 +48,7 @@ export default async function Dashboard() {
       teamName: c.teamName,
       mascot: c.mascot,
       color: c.color,
+      dayChangePct: c.portfolio.positions.length > 0 ? c.portfolio.dayChangePct : null,
       weekReturnPct: c.stats.weekReturnPct,
       sinceStartReturnPct: c.stats.sinceStartReturnPct,
       riskLabel: c.stats.riskLabel,

@@ -52,7 +52,9 @@ export type RaceSeries = {
 export async function getRaceData(competitors: Competitor[]): Promise<RaceSeries[]> {
   const out: RaceSeries[] = [];
   for (const c of competitors) {
-    const points = await getReturnSeries(c.id);
+    // Pass the live portfolio so each series ends with an intraday "now"
+    // point that moves with quote refreshes (robot included).
+    const points = await getReturnSeries(c.id, c.portfolio);
     if (points.length > 0) {
       out.push({
         id: c.id,

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { getDb, kids, snapshots, stocks, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
-import { isMarketDay, lastCompletedMarketDay, startOfWeekEt } from "./market";
+import { etDateStr, isMarketDay, lastCompletedMarketDay, startOfWeekEt } from "./market";
 
 export const RISK_FREE_RATE = 0.045;
 
@@ -330,18 +330,51 @@ async function getDailyReturns(
   return { dates, returns };
 }
 
-/** Growth-of-$100 index series (time-weighted), for the race chart. */
+/**
+ * Growth-of-$100 index series (time-weighted), for the race chart.
+ *
+ * When `live` (the kid's current portfolio, valued at fresh quotes) is
+ * passed, a "now" point dated today is appended so the race moves intraday
+ * instead of waiting for the nightly snapshot: the live point continues the
+ * index from the last snapshot by the same deposit-adjusted return rule as
+ * getDailyReturns. Once the EOD cron writes today's snapshot, the live point
+ * replaces it (same date) rather than duplicating it — and since quotes then
+ * equal closes, the two coincide.
+ */
 export async function getReturnSeries(
-  kidId: number
+  kidId: number,
+  live?: Portfolio
 ): Promise<{ date: string; index: number }[]> {
   const db = await getDb();
   const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
+  if (!kid) return [];
   const snaps = await db
     .select()
     .from(snapshots)
     .where(eq(snapshots.kidId, kidId))
     .orderBy(asc(snapshots.snapDate));
-  if (!kid || snaps.length === 0) return [];
+  const txs = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.kidId, kidId));
+  const today = etDateStr();
+
+  if (snaps.length === 0) {
+    // No snapshots yet (first trades logged today): draw a live-only segment
+    // from a synthetic 0% start so the race still moves on day one.
+    if (live && live.contributions > 0 && (live.invested > 0 || live.positions.length > 0)) {
+      const origin = lastCompletedMarketDay();
+      const liveIdx = (live.totalValue / live.contributions) * 100;
+      if (origin < today) {
+        return [
+          { date: origin, index: 100 },
+          { date: today, index: liveIdx },
+        ];
+      }
+      return [{ date: today, index: liveIdx }];
+    }
+    return [];
+  }
   const { dates, returns } = await getDailyReturns(kidId);
 
   // Anchor the race at a synthetic 0% "start" point the day before the first
@@ -349,10 +382,6 @@ export async function getReturnSeries(
   // (starting budget + deposits). Day one then draws a real line segment —
   // not a single floating dot — and the whole series lines up with the
   // "since start" numbers on the scoreboard.
-  const txs = await db
-    .select()
-    .from(transactions)
-    .where(eq(transactions.kidId, kidId));
   const baseContrib =
     kid.startingBudget +
     txs
@@ -368,6 +397,23 @@ export async function getReturnSeries(
   for (let i = 0; i < dates.length; i++) {
     idx *= 1 + returns[i];
     series.push({ date: dates[i], index: idx });
+  }
+
+  // Live "now" point. Only on market days: on weekends/holidays quotes are
+  // frozen at Friday's close, so a live point would just stretch the x-axis
+  // with a flat segment dated a non-trading day.
+  const lastSnap = snaps[snaps.length - 1];
+  if (live && isMarketDay(today) && lastSnap.snapDate <= today && lastSnap.value > 0) {
+    const depositsAfter = txs
+      .filter((t) => t.type === "deposit" && t.tradeDate > lastSnap.snapDate)
+      .reduce((s, t) => s + t.amount, 0);
+    const lastIdx = series[series.length - 1].index;
+    const liveIdx = lastIdx * ((live.totalValue - depositsAfter) / lastSnap.value);
+    if (lastSnap.snapDate === today) {
+      series[series.length - 1] = { date: today, index: liveIdx };
+    } else {
+      series.push({ date: today, index: liveIdx });
+    }
   }
   return series;
 }

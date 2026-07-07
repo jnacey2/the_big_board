@@ -11,6 +11,7 @@ export type ScoreRow = {
   teamName: string;
   mascot: string;
   color: string;
+  dayChangePct: number | null;
   weekReturnPct: number | null;
   sinceStartReturnPct: number | null;
   riskLabel: string | null;
@@ -51,14 +52,15 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
       <p className="px-4 pt-3 text-xs text-ink-dim">{active.sub}</p>
 
       <div className="overflow-x-auto p-2 sm:p-4">
-        <table className="w-full min-w-[560px] text-sm">
+        <table className="w-full min-w-[600px] text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-ink-dim">
               <th className="px-2 py-2">Rank</th>
               <th className="px-2 py-2">Portfolio</th>
+              <th className="px-2 py-2 text-right">Today</th>
               <th className="px-2 py-2 text-right">This Week</th>
               <th className="px-2 py-2 text-right">Since Start</th>
-              <th className="px-2 py-2 text-center">Risk</th>
+              <th className="hidden px-2 py-2 text-center sm:table-cell">Risk</th>
               <th className="px-2 py-2 text-right">Sharpe</th>
             </tr>
           </thead>
@@ -97,13 +99,16 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
                     </Link>
                   )}
                 </td>
+                <td className={`px-2 py-3 text-right font-bold tabular ${pctColor(r.dayChangePct)}`}>
+                  {fmtPctCell(r.dayChangePct)}
+                </td>
                 <td className={`px-2 py-3 text-right font-bold tabular ${pctColor(r.weekReturnPct)}`}>
                   {fmtPctCell(r.weekReturnPct)}
                 </td>
                 <td className={`px-2 py-3 text-right font-bold tabular ${pctColor(r.sinceStartReturnPct)}`}>
                   {fmtPctCell(r.sinceStartReturnPct)}
                 </td>
-                <td className="px-2 py-3 text-center">
+                <td className="hidden px-2 py-3 text-center sm:table-cell">
                   {r.riskLabel ? (
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
