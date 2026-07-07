@@ -133,6 +133,12 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
     const st = stockByTicker.get(ticker);
     const cbForFallback = costBasis.get(ticker) ?? 0;
     // No live quote (offline / API hiccup): value at average cost rather than $0.
+    // Loud warning because this silently misvalues the position (cost != market).
+    if (!q) {
+      console.warn(
+        `getPortfolio(kid ${kidId}): no quote for ${ticker}; valuing ${n} shares at avg cost`
+      );
+    }
     const price = q?.price ?? (n > 0 ? cbForFallback / n : 0);
     const prevClose = q?.prevClose ?? null;
     const cb = costBasis.get(ticker) ?? 0;
