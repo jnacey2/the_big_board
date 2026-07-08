@@ -240,7 +240,7 @@ function ExecutePortfolios({ draft, onExecuted }: { draft: Draft; onExecuted: ()
 
   const undo = async () => {
     if (busy) return;
-    if (!confirm("Undo the draft buys? All auto-bought positions (and the robot's mirrors) are removed and you can buy again at fresh prices.")) return;
+    if (!confirm("Undo the draft buys? All auto-bought positions (and the robot's SPY benchmark) are removed and you can buy again at fresh prices.")) return;
     setBusy(true);
     setError("");
     try {
@@ -362,7 +362,7 @@ function ExecutePortfolios({ draft, onExecuted }: { draft: Draft; onExecuted: ()
       </button>
       <p className="mt-2 text-xs text-ink-dim">
         Each team&apos;s cash gets split equally across their picks at today&apos;s prices — and
-        Indexo puts the same dollars into SPY.
+        Indexo puts one team&apos;s budget all into SPY.
       </p>
       {error && <p className="mt-2 text-sm font-bold text-down">{error}</p>}
     </div>

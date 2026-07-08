@@ -13,6 +13,13 @@ import AutoRefresh from "@/components/AutoRefresh";
 
 export const dynamic = "force-dynamic";
 
+/** Robot benchmark story, with his real funding amount once the draft ran. */
+function robotCaption(contributions: number): string {
+  return contributions > 0
+    ? `Started with the same $${Math.round(contributions).toLocaleString("en-US")} and put it all in the S&P 500`
+    : "Starts with the same money as each kid and puts it all in the S&P 500";
+}
+
 export default async function Dashboard() {
   const db = await getDb();
   const kidRows = await db.select().from(kidsTable);
@@ -156,7 +163,7 @@ export default async function Dashboard() {
               )}
             </div>
             <p className="mt-3 border-t border-dashed pt-2 text-xs text-ink-dim" style={{ borderColor: `${robot.color}33` }}>
-              🤖 The market robot — buys SPY whenever the kids buy
+              🤖 {robotCaption(robot.portfolio.contributions)}
             </p>
           </Link>
         )}

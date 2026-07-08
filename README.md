@@ -13,8 +13,9 @@ the race — with an AI Coach explaining every move in kid-friendly language.
   the draft ends, a "Buy the portfolios!" button splits each kid's budget
   equally across their picks at the last available prices (fractional shares).
 - **The Race** — growth-of-$100 chart for every kid plus **Indexo**, a robot
-  rival that mirrors every kid trade into SPY so they can see how they stack up
-  against "just buying the market."
+  rival that starts with the same budget as a kid and puts all of it into SPY
+  on draft day, so they can see how they stack up against "just buying the
+  market."
 - **Two championship belts** — Total Return and Best Risk-Adjusted (Sharpe).
 - **Portfolio drill-downs** — sector donut, Sharpe/volatility with soccer-team
   risk analogies, per-position P&L, and a "news detective" panel for every

@@ -64,7 +64,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Insert the trade + the robot rival's mirrored SPY trade.
+  // Insert the trade. Indexo the benchmark doesn't react — he bought SPY once
+  // on draft day and stays fully invested no matter how the kids rebalance.
   const tx =
     type === "buy"
       ? await executeBuy(kid.id, ticker, nShares, nPrice, date, { note: note || null })
@@ -73,10 +74,6 @@ export async function POST(req: NextRequest) {
   // Refresh snapshot history so charts update immediately (best-effort — it
   // needs FMP history; the cron will backfill anything missed).
   await backfillSnapshots(kid.id).catch((e) => console.error("snapshot backfill failed:", e));
-  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
-  if (robot) {
-    await backfillSnapshots(robot.id).catch((e) => console.error("robot backfill failed:", e));
-  }
 
   return NextResponse.json(tx);
 }
@@ -92,12 +89,19 @@ export async function DELETE(req: NextRequest) {
   const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
   if (!tx) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  // Remove robot mirrors too.
+  // Remove legacy robot mirrors too (rows from the old per-trade mirroring
+  // model; new robot rows aren't linked to kid trades).
+  const mirrors = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.mirrorsTransactionId, id));
   await db.delete(transactions).where(eq(transactions.mirrorsTransactionId, id));
   await db.delete(transactions).where(eq(transactions.id, id));
 
   await backfillSnapshots(tx.kidId);
-  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
-  if (robot) await backfillSnapshots(robot.id);
+  if (mirrors.length > 0) {
+    const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
+    if (robot) await backfillSnapshots(robot.id);
+  }
   return NextResponse.json({ ok: true });
 }

@@ -2,9 +2,14 @@ import { eq } from "drizzle-orm";
 import { getDb, kids, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
 import { etDateStr, isMarketOpen } from "./market";
-import { replayTransactions } from "./portfolio";
 
 type TxRow = typeof transactions.$inferSelect;
+
+/**
+ * Note written on the robot benchmark's one-time funding + SPY buy, so undo
+ * and the admin rebuild can find exactly these rows.
+ */
+export const ROBOT_BENCHMARK_NOTE = "Indexo benchmark: one-time all-in SPY";
 
 /** Close price of `ticker` on `date` (or the last close before it); live quote for today. */
 export async function priceOn(ticker: string, date: string): Promise<number | null> {
@@ -22,13 +27,72 @@ export async function priceOn(ticker: string, date: string): Promise<number | nu
 }
 
 /**
- * Insert a buy transaction for a kid and mirror the same dollars into SPY for
- * the robot rival (a funding deposit plus a SPY buy on the same date).
+ * How much the robot benchmark starts with. The point of Indexo is to be
+ * directly comparable to one kid, so this equals a single kid's starting
+ * budget — if the kids have different budgets, their average (there's no
+ * single "right" number then, and the average keeps him mid-pack fair).
+ * A startingBudget set on the robot's own row overrides everything.
+ */
+export async function robotBenchmarkAmount(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select().from(kids);
+  const robot = rows.find((k) => k.kind === "robot");
+  if (robot && robot.startingBudget > 0) return robot.startingBudget;
+  const budgets = rows.filter((k) => k.kind === "kid").map((k) => k.startingBudget);
+  if (budgets.length === 0) return 5000;
+  return budgets.reduce((s, b) => s + b, 0) / budgets.length;
+}
+
+/**
+ * Fund the robot benchmark: a single deposit of `amount` plus an all-in SPY
+ * buy on `date`. This is Indexo's ONLY activity — he does not mirror
+ * individual kid trades (kids trading within their budget is rebalancing;
+ * the benchmark just stays fully invested from day one).
  *
+ * No-ops if the robot already holds his benchmark rows (idempotent) or if
+ * there is no robot. Caller owns snapshot refresh.
+ */
+export async function fundRobotBenchmark(
+  amount: number,
+  spyPrice: number,
+  date: string
+): Promise<boolean> {
+  const db = await getDb();
+  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
+  if (!robot || !(amount > 0) || !(spyPrice > 0)) return false;
+
+  const existing = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.kidId, robot.id));
+  if (existing.some((t) => t.note === ROBOT_BENCHMARK_NOTE)) return false;
+
+  await db.insert(transactions).values({
+    kidId: robot.id,
+    ticker: "SPY",
+    type: "deposit",
+    shares: 0,
+    price: 0,
+    amount,
+    tradeDate: date,
+    note: ROBOT_BENCHMARK_NOTE,
+  });
+  await db.insert(transactions).values({
+    kidId: robot.id,
+    ticker: "SPY",
+    type: "buy",
+    shares: amount / spyPrice,
+    price: spyPrice,
+    amount,
+    tradeDate: date,
+    note: ROBOT_BENCHMARK_NOTE,
+  });
+  return true;
+}
+
+/**
+ * Insert a buy transaction for a kid.
  * Does NOT check cash guardrails or refresh snapshots — callers own that.
- * Pass `spyPrice` when the caller already looked it up (e.g. batch draft
- * execution); otherwise it is resolved here, and the mirror is skipped
- * (best-effort) if SPY has no price.
  */
 export async function executeBuy(
   kidId: number,
@@ -36,14 +100,9 @@ export async function executeBuy(
   shares: number,
   price: number,
   date: string,
-  opts: { note?: string | null; spyPrice?: number | null } = {}
+  opts: { note?: string | null } = {}
 ): Promise<TxRow> {
   const db = await getDb();
-  const amount = shares * price;
-
-  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
-  if (!kid) throw new Error(`Kid ${kidId} not found`);
-
   const [tx] = await db
     .insert(transactions)
     .values({
@@ -52,54 +111,16 @@ export async function executeBuy(
       type: "buy",
       shares,
       price,
-      amount,
+      amount: shares * price,
       tradeDate: date,
       note: opts.note ?? null,
     })
     .returning();
-
-  // ── Robot rival mirror: same dollars into SPY on the same date ──
-  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
-  if (robot) {
-    const spyPrice =
-      opts.spyPrice ??
-      (await priceOn("SPY", date).catch((e) => {
-        console.error("SPY price lookup failed (robot mirror skipped):", e);
-        return null;
-      }));
-    if (spyPrice && spyPrice > 0) {
-      // Fund the robot with the same dollars, then buy SPY.
-      await db.insert(transactions).values({
-        kidId: robot.id,
-        ticker: "SPY",
-        type: "deposit",
-        shares: 0,
-        price: 0,
-        amount,
-        tradeDate: date,
-        note: `mirrors ${kid.teamName} ${ticker} buy`,
-        mirrorsTransactionId: tx.id,
-      });
-      await db.insert(transactions).values({
-        kidId: robot.id,
-        ticker: "SPY",
-        type: "buy",
-        shares: amount / spyPrice,
-        price: spyPrice,
-        amount,
-        tradeDate: date,
-        note: `mirrors ${kid.teamName} ${ticker} buy`,
-        mirrorsTransactionId: tx.id,
-      });
-    }
-  }
-
   return tx;
 }
 
 /**
- * Insert a sell transaction for a kid and mirror it by selling the same dollar
- * amount of SPY from the robot rival (capped at what the robot holds).
+ * Insert a sell transaction for a kid.
  * Does NOT check share guardrails or refresh snapshots — callers own that.
  */
 export async function executeSell(
@@ -111,11 +132,6 @@ export async function executeSell(
   opts: { note?: string | null } = {}
 ): Promise<TxRow> {
   const db = await getDb();
-  const amount = shares * price;
-
-  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
-  if (!kid) throw new Error(`Kid ${kidId} not found`);
-
   const [tx] = await db
     .insert(transactions)
     .values({
@@ -124,41 +140,10 @@ export async function executeSell(
       type: "sell",
       shares,
       price,
-      amount,
+      amount: shares * price,
       tradeDate: date,
       note: opts.note ?? null,
     })
     .returning();
-
-  const [robot] = await db.select().from(kids).where(eq(kids.kind, "robot"));
-  if (robot) {
-    const spyPrice = await priceOn("SPY", date).catch((e) => {
-      console.error("SPY price lookup failed (robot mirror skipped):", e);
-      return null;
-    });
-    if (spyPrice && spyPrice > 0) {
-      const robotTxs = await db
-        .select()
-        .from(transactions)
-        .where(eq(transactions.kidId, robot.id));
-      const robotState = replayTransactions(robotTxs, 0);
-      const heldSpy = robotState.shares.get("SPY") ?? 0;
-      const sellShares = Math.min(amount / spyPrice, heldSpy);
-      if (sellShares > 1e-9) {
-        await db.insert(transactions).values({
-          kidId: robot.id,
-          ticker: "SPY",
-          type: "sell",
-          shares: sellShares,
-          price: spyPrice,
-          amount: sellShares * spyPrice,
-          tradeDate: date,
-          note: `mirrors ${kid.teamName} ${ticker} sell`,
-          mirrorsTransactionId: tx.id,
-        });
-      }
-    }
-  }
-
   return tx;
 }

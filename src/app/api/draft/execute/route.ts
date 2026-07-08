@@ -5,7 +5,13 @@ import { isAdmin } from "@/lib/adminAuth";
 import { getQuotes } from "@/lib/fmp";
 import { etDateStr } from "@/lib/market";
 import { backfillSnapshots, replayTransactions } from "@/lib/portfolio";
-import { executeBuy, priceOn } from "@/lib/trades";
+import {
+  executeBuy,
+  fundRobotBenchmark,
+  priceOn,
+  robotBenchmarkAmount,
+  ROBOT_BENCHMARK_NOTE,
+} from "@/lib/trades";
 
 export const maxDuration = 60;
 
@@ -39,9 +45,13 @@ export type ExecutedTeam = {
  * activity and this only creates the paper positions inside the game — the
  * parent still handles any real-world money separately.
  *
+ * The robot benchmark (Indexo) is funded here too: a single deposit equal to
+ * one kid's budget, all of it into SPY at the same quote price — and that's
+ * his last trade ever. He does NOT mirror kid trades afterwards.
+ *
  * POST with {action:"undo"} (parent PIN required) reverses an execution:
- * deletes the auto-buys and their robot mirrors, rebuilds snapshots, and
- * clears executedAt so the draft can be bought again.
+ * deletes the auto-buys and the robot's benchmark rows, rebuilds snapshots,
+ * and clears executedAt so the draft can be bought again.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -78,7 +88,7 @@ export async function POST(req: NextRequest) {
   const date = etDateStr();
 
   // Look up every price first — all-or-nothing, so a failed lookup can't
-  // leave a kid with half a portfolio. SPY is required for the robot mirror.
+  // leave a kid with half a portfolio. SPY is required for the robot benchmark.
   //
   // Buy at the SAME price source the app values portfolios with (getQuotes):
   // if we bought at yesterday's close but valued at today's quote, kids would
@@ -141,10 +151,7 @@ export async function POST(req: NextRequest) {
     for (const ticker of roster) {
       const price = prices.get(ticker)!;
       const shares = perStock / price;
-      await executeBuy(kid.id, ticker, shares, price, date, {
-        note: DRAFT_BUY_NOTE,
-        spyPrice,
-      });
+      await executeBuy(kid.id, ticker, shares, price, date, { note: DRAFT_BUY_NOTE });
       positions.push({ ticker, shares, price, amount: perStock });
     }
     teams.push({
@@ -157,6 +164,12 @@ export async function POST(req: NextRequest) {
       positions,
     });
   }
+
+  // Fund the robot benchmark: one deposit + one all-in SPY buy at the same
+  // quote price the kids bought at. Skipped if he already has his benchmark
+  // rows (e.g. this draft was undone and re-executed the same day but a
+  // parent manually rebuilt him in between).
+  await fundRobotBenchmark(await robotBenchmarkAmount(), spyPrice, date);
 
   // Refresh snapshots so the race chart updates immediately (best-effort).
   for (const t of teams) {
@@ -172,9 +185,11 @@ export async function POST(req: NextRequest) {
 
 /**
  * Reverse the most recent draft execution (parent PIN required): delete the
- * auto-buy transactions it created (and the robot's mirrored deposit + SPY buy
- * rows), rebuild affected snapshots from what's left, and clear executedAt so
- * "Buy the portfolios!" is available again.
+ * auto-buy transactions it created and the robot's benchmark deposit + SPY
+ * buy (found by their tagged note; legacy per-trade mirrors linked via
+ * mirrorsTransactionId are cleaned up too), rebuild affected snapshots from
+ * what's left, and clear executedAt so "Buy the portfolios!" is available
+ * again.
  */
 async function undoExecution() {
   if (!(await isAdmin())) {
@@ -196,17 +211,26 @@ async function undoExecution() {
     .where(and(eq(transactions.note, DRAFT_BUY_NOTE), eq(transactions.tradeDate, execDate)));
   const buyIds = draftBuys.map((t) => t.id);
 
-  const mirrors = buyIds.length
-    ? await db
-        .select()
-        .from(transactions)
-        .where(inArray(transactions.mirrorsTransactionId, buyIds))
-    : [];
+  // Robot rows to remove: the tagged benchmark deposit + SPY buy (matched by
+  // note alone — the pair exists at most once, and an admin rebuild may have
+  // re-dated it), plus any legacy per-trade mirrors from the old model.
+  const robotRows = [
+    ...(await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.note, ROBOT_BENCHMARK_NOTE))),
+    ...(buyIds.length
+      ? await db
+          .select()
+          .from(transactions)
+          .where(inArray(transactions.mirrorsTransactionId, buyIds))
+      : []),
+  ];
 
-  const affectedKidIds = [...new Set([...draftBuys, ...mirrors].map((t) => t.kidId))];
+  const affectedKidIds = [...new Set([...draftBuys, ...robotRows].map((t) => t.kidId))];
 
-  if (mirrors.length > 0) {
-    await db.delete(transactions).where(inArray(transactions.id, mirrors.map((t) => t.id)));
+  if (robotRows.length > 0) {
+    await db.delete(transactions).where(inArray(transactions.id, robotRows.map((t) => t.id)));
   }
   if (buyIds.length > 0) {
     await db.delete(transactions).where(inArray(transactions.id, buyIds));
@@ -224,6 +248,6 @@ async function undoExecution() {
 
   return NextResponse.json({
     ok: true,
-    undone: { transactions: buyIds.length + mirrors.length, kids: affectedKidIds.length },
+    undone: { transactions: buyIds.length + robotRows.length, kids: affectedKidIds.length },
   });
 }

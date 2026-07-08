@@ -176,7 +176,7 @@ function TransactionsTab() {
   };
 
   const remove = async (id: number) => {
-    if (!confirm("Delete this transaction (and its robot mirror)?")) return;
+    if (!confirm("Delete this transaction?")) return;
     await fetch(`/api/transactions?id=${id}`, { method: "DELETE" });
     load();
   };
@@ -266,8 +266,7 @@ function TransactionsTab() {
           </div>
           {amount > 0 && (
             <p className="text-sm text-ink-dim">
-              Total: <span className="font-bold text-ink tabular">${amount.toFixed(2)}</span>{" "}
-              — Indexo the Robot will mirror this into SPY.
+              Total: <span className="font-bold text-ink tabular">${amount.toFixed(2)}</span>
             </p>
           )}
           {msg && (
@@ -451,7 +450,7 @@ function KidsTab() {
               <div className="font-extrabold">{k.teamName}</div>
               <div className="text-sm text-ink-dim">
                 {k.name}
-                {k.kind === "robot" && " · robot rival (mirrors buys into SPY)"}
+                {k.kind === "robot" && " · benchmark (one budget, all-in on SPY since draft day)"}
               </div>
             </div>
             {k.kind === "kid" && (
@@ -470,7 +469,85 @@ function KidsTab() {
             )}
           </div>
         ))}
+        <RebuildRobotCard kids={kids} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * One-click fix for robots inflated by the old per-trade mirroring model:
+ * wipes Indexo's history and recreates a single deposit + all-in SPY buy
+ * dated on draft-execution day.
+ */
+function RebuildRobotCard({ kids }: { kids: Kid[] }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const robot = kids.find((k) => k.kind === "robot");
+  if (!robot) return null;
+
+  const budgets = kids.filter((k) => k.kind === "kid").map((k) => k.startingBudget);
+  const amount =
+    robot.startingBudget > 0
+      ? robot.startingBudget
+      : budgets.length > 0
+        ? budgets.reduce((s, b) => s + b, 0) / budgets.length
+        : 5000;
+
+  const run = async () => {
+    if (
+      !confirm(
+        `Wipe Indexo's history and rebuild him as a single $${Math.round(amount).toLocaleString()} SPY buy on draft day?`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/rebuild-robot", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({
+          ok: true,
+          text: `Done — Indexo now holds ${data.shares.toFixed(4)} SPY bought at $${data.spyPrice.toFixed(2)} on ${data.date} ($${Math.round(data.amount).toLocaleString()} total).`,
+        });
+      } else {
+        setMsg({ ok: false, text: data.error ?? "Rebuild failed — try again." });
+      }
+    } catch {
+      setMsg({ ok: false, text: "Rebuild failed — try again." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel border-dashed p-4">
+      <div className="flex items-center gap-4">
+        <span className="text-3xl">🤖</span>
+        <div className="flex-1">
+          <div className="font-extrabold">Fix Indexo&apos;s portfolio</div>
+          <p className="text-sm text-ink-dim">
+            If Indexo shows more money than the kids started with (the old rule gave him every
+            kid&apos;s dollars), rebuild him as a clean benchmark: one budget, fully invested in SPY
+            since draft day.
+          </p>
+        </div>
+        <button
+          onClick={run}
+          disabled={busy}
+          className="shrink-0 rounded-xl bg-panel2 px-4 py-2.5 text-sm font-bold text-ink hover:bg-edge disabled:opacity-50"
+        >
+          {busy
+            ? "Rebuilding…"
+            : `Rebuild Indexo as $${Math.round(amount).toLocaleString()} SPY benchmark`}
+        </button>
+      </div>
+      {msg && (
+        <p className={`mt-2 text-sm font-bold ${msg.ok ? "text-up" : "text-down"}`}>{msg.text}</p>
+      )}
     </div>
   );
 }

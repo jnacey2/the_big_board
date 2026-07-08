@@ -32,7 +32,7 @@ export default function CoachTour({ kidNames }: { kidNames: string[] }) {
     {
       emoji: "🤖",
       title: "Beat Indexo",
-      body: "Indexo the Robot copies every dollar you invest, but just buys the whole market. Beating a robot that doesn't even think is harder than it sounds…",
+      body: "Indexo the Robot started with the same money as you and put every penny into the whole market on day one. Beating a robot that doesn't even think is harder than it sounds…",
     },
     {
       emoji: "🕵️",

@@ -62,7 +62,9 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
           </h1>
           <p className="text-sm text-ink-dim">
             {kid.kind === "robot"
-              ? "The market robot — buys SPY whenever the kids buy"
+              ? portfolio.contributions > 0
+                ? `The market robot — started with the same $${Math.round(portfolio.contributions).toLocaleString("en-US")} and put it all in the S&P 500`
+                : "The market robot — starts with the same money as each kid, all in the S&P 500"
               : `General manager: ${kid.name}`}
           </p>
         </div>

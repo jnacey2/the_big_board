@@ -46,7 +46,7 @@ export const stocks = pgTable("stocks", {
   profileFetchedAt: timestamp("profile_fetched_at"),
 });
 
-/** Real transactions logged by the parent (and mirrored robot SPY trades). */
+/** Real transactions logged by the parent (plus the robot's one-time SPY benchmark rows). */
 export const transactions = pgTable(
   "transactions",
   {
@@ -63,7 +63,11 @@ export const transactions = pgTable(
     amount: doublePrecision("amount").notNull(), // total dollars (+ for value in, used directly for dividends)
     tradeDate: date("trade_date").notNull(),
     note: text("note"),
-    /** id of the kid transaction this robot trade mirrors */
+    /**
+     * Legacy: id of the kid transaction a robot trade mirrored, from the old
+     * per-trade mirroring model. New robot rows don't set it (the benchmark
+     * is a single tagged deposit + SPY buy); kept so old data can be cleaned up.
+     */
     mirrorsTransactionId: integer("mirrors_transaction_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -215,7 +219,7 @@ export const quotes = pgTable("quotes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-/** Daily close price history cache (for charts, Sharpe, robot mirror, backfill). */
+/** Daily close price history cache (for charts, Sharpe, robot benchmark, backfill). */
 export const priceHistory = pgTable(
   "price_history",
   {

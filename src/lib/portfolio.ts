@@ -80,7 +80,7 @@ export function replayTransactions(
       cash += tx.amount;
       dividends += tx.amount;
     } else if (tx.type === "deposit") {
-      // External money in (used by the robot rival's mirrored funding).
+      // External money in (used to fund the robot benchmark).
       cash += tx.amount;
     }
   }
@@ -185,7 +185,7 @@ export async function getPortfolio(kidId: number): Promise<Portfolio> {
   const totalRealized = [...realized.values()].reduce((s, v) => s + v, 0);
 
   // Money the outside world put in: starting budget plus any deposits
-  // (the robot rival is funded entirely by mirrored deposits).
+  // (the robot rival is funded entirely by his benchmark deposit).
   const contributions =
     kid.startingBudget +
     txs.filter((t) => t.type === "deposit").reduce((s, t) => s + t.amount, 0);
@@ -295,8 +295,8 @@ export type PortfolioStats = {
 
 /**
  * Time-weighted daily returns per market day, adjusted for external deposits
- * (the robot rival is funded by mirrored deposits mid-competition; kids get all
- * cash on day one). r_t = (V_t - deposits_t) / V_{t-1} - 1.
+ * (the robot rival is funded by a deposit; kids get all cash on day one).
+ * r_t = (V_t - deposits_t) / V_{t-1} - 1.
  */
 async function getDailyReturns(
   kidId: number
