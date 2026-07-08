@@ -22,6 +22,7 @@ export default async function Dashboard() {
 
   const competitors = await getCompetitors();
   const realKids = competitors.filter((c) => c.kind === "kid");
+  const robot = competitors.find((c) => c.kind === "robot");
 
   // Badge sweep (cheap: data is cached), then read recent badges.
   for (const c of realKids) {
@@ -114,6 +115,51 @@ export default async function Dashboard() {
             </div>
           </Link>
         ))}
+
+        {robot && (
+          <Link
+            href={`/portfolio/${robot.id}`}
+            className="panel panel-hover border-dashed p-5 sm:col-span-2 lg:col-span-1"
+            style={{ "--glow": robot.color, borderColor: `${robot.color}55` } as React.CSSProperties}
+          >
+            <div className="flex items-center gap-3">
+              <span
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed text-2xl"
+                style={{ borderColor: robot.color, backgroundColor: `${robot.color}18` }}
+              >
+                {robot.mascot}
+              </span>
+              <div>
+                <div className="display text-lg font-extrabold leading-tight" style={{ color: robot.color }}>
+                  {robot.teamName}
+                </div>
+                <div className="text-xs font-bold uppercase tracking-wide" style={{ color: `${robot.color}bb` }}>
+                  The machine to beat
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-ink-dim">Portfolio value</div>
+                <div className="display text-3xl font-extrabold">
+                  <NumberTicker value={robot.portfolio.totalValue} prefix="$" />
+                </div>
+              </div>
+              {robot.portfolio.positions.length > 0 && (
+                <div className={`text-right ${robot.portfolio.dayChangePct >= 0 ? "text-up" : "text-down"}`}>
+                  <div className="text-xs uppercase tracking-wide opacity-70">Today</div>
+                  <div className="text-lg font-extrabold tabular">
+                    {robot.portfolio.dayChangePct >= 0 ? "+" : ""}
+                    {robot.portfolio.dayChangePct.toFixed(2)}%
+                  </div>
+                </div>
+              )}
+            </div>
+            <p className="mt-3 border-t border-dashed pt-2 text-xs text-ink-dim" style={{ borderColor: `${robot.color}33` }}>
+              🤖 The market robot — buys SPY whenever the kids buy
+            </p>
+          </Link>
+        )}
       </div>
 
       {/* Race chart */}

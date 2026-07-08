@@ -60,7 +60,11 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
           <h1 className="display text-3xl font-extrabold" style={{ color: kid.color }}>
             {kid.teamName}
           </h1>
-          <p className="text-sm text-ink-dim">General manager: {kid.name}</p>
+          <p className="text-sm text-ink-dim">
+            {kid.kind === "robot"
+              ? "The market robot — buys SPY whenever the kids buy"
+              : `General manager: ${kid.name}`}
+          </p>
         </div>
         <div className="ml-auto text-right">
           <div className="text-xs uppercase tracking-wide text-ink-dim">Total value</div>
