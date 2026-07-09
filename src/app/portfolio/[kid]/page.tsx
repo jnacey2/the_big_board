@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { getDb, kids } from "@/db";
 import { getPortfolio, getStats, sectorBreakdown } from "@/lib/portfolio";
+import { formatSharpe } from "@/lib/sharpeDisplay";
 import { getBadges } from "@/lib/badges";
 import CoachCommentary from "@/components/coach/CoachCommentary";
 import HoldingsList, { type HoldingRow } from "@/components/HoldingsList";
@@ -94,7 +95,7 @@ export default async function PortfolioPage({ params }: { params: Promise<{ kid:
         <Stat label="Cash to invest" value={`$${portfolio.cash.toFixed(2)}`} />
         <Stat
           label="Sharpe ratio"
-          value={stats.sharpe != null ? stats.sharpe.toFixed(2) : "—"}
+          value={stats.sharpe != null ? formatSharpe(stats.sharpe).text : "—"}
           term="sharpe ratio"
         />
         <Stat

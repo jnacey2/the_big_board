@@ -3,7 +3,15 @@ import { getDb, kids, snapshots, stocks, transactions } from "@/db";
 import { ensurePriceHistory, getPriceHistory, getQuotes } from "./fmp";
 import { etDateStr, isMarketDay, lastCompletedMarketDay, startOfWeekEt } from "./market";
 
-export const RISK_FREE_RATE = 0.045;
+export const RISK_FREE_RATE = 0.045; // annual, converted to daily where used
+
+/**
+ * Minimum number of daily return observations before a Sharpe ratio is shown.
+ * With fewer samples the annualized ratio is statistical noise — magnitudes
+ * like ±10 fall out of two or three quiet days — so the UI keeps the
+ * "warming up" treatment until then.
+ */
+export const MIN_SHARPE_DAYS = 5;
 
 export type Position = {
   ticker: string;
@@ -294,31 +302,33 @@ export type PortfolioStats = {
 };
 
 /**
- * Time-weighted daily returns per market day, adjusted for external deposits
- * (the robot rival is funded by a deposit; kids get all cash on day one).
- * r_t = (V_t - deposits_t) / V_{t-1} - 1.
+ * Pure core of getDailyReturns (exported for the math regression script,
+ * scripts/test-sharpe-math.ts).
+ *
+ * Day one's return is measured against the money put in by then
+ * (starting budget + deposits up to the first snapshot day):
+ *   r_1 = V_1 / base - 1
+ * Every later day is snapshot-over-snapshot, with deposits landing on day t
+ * subtracted from V_t (outside money isn't return):
+ *   r_t = (V_t - deposits_t) / V_{t-1} - 1
+ *
+ * Dropping the day-one return (as this code once did) makes Sharpe blind to
+ * the first session's move while Since Start and the race chart include it —
+ * which is how a portfolio down since the start showed a big positive Sharpe.
  */
-async function getDailyReturns(
-  kidId: number
-): Promise<{ dates: string[]; returns: number[] }> {
-  const db = await getDb();
-  const snaps = await db
-    .select()
-    .from(snapshots)
-    .where(eq(snapshots.kidId, kidId))
-    .orderBy(asc(snapshots.snapDate));
-  if (snaps.length < 2) return { dates: [], returns: [] };
-
-  const txs = await db.select().from(transactions).where(eq(transactions.kidId, kidId));
-  const depositsByDay = new Map<string, number>();
-  for (const t of txs) {
-    if (t.type === "deposit") {
-      depositsByDay.set(t.tradeDate, (depositsByDay.get(t.tradeDate) ?? 0) + t.amount);
-    }
-  }
-
+export function computeDailyReturns(
+  snaps: { snapDate: string; value: number }[],
+  depositsByDay: Map<string, number>,
+  baseContributions: number
+): { dates: string[]; returns: number[] } {
   const dates: string[] = [];
   const returns: number[] = [];
+  if (snaps.length === 0) return { dates, returns };
+
+  if (baseContributions > 0) {
+    dates.push(snaps[0].snapDate);
+    returns.push(snaps[0].value / baseContributions - 1);
+  }
   for (let i = 1; i < snaps.length; i++) {
     const prev = snaps[i - 1].value;
     const dep = depositsByDay.get(snaps[i].snapDate) ?? 0;
@@ -328,6 +338,40 @@ async function getDailyReturns(
     }
   }
   return { dates, returns };
+}
+
+/**
+ * Time-weighted daily returns per market day, adjusted for external deposits
+ * (the robot rival is funded by a deposit; kids get all cash on day one).
+ * Includes day one (first snapshot vs. contributions); the live "today" move
+ * is intentionally excluded — stats update from end-of-day snapshots only.
+ */
+async function getDailyReturns(
+  kidId: number
+): Promise<{ dates: string[]; returns: number[] }> {
+  const db = await getDb();
+  const [kid] = await db.select().from(kids).where(eq(kids.id, kidId));
+  const snaps = await db
+    .select()
+    .from(snapshots)
+    .where(eq(snapshots.kidId, kidId))
+    .orderBy(asc(snapshots.snapDate));
+  if (!kid || snaps.length === 0) return { dates: [], returns: [] };
+
+  const txs = await db.select().from(transactions).where(eq(transactions.kidId, kidId));
+  const depositsByDay = new Map<string, number>();
+  for (const t of txs) {
+    if (t.type === "deposit") {
+      depositsByDay.set(t.tradeDate, (depositsByDay.get(t.tradeDate) ?? 0) + t.amount);
+    }
+  }
+  const baseContributions =
+    kid.startingBudget +
+    txs
+      .filter((t) => t.type === "deposit" && t.tradeDate <= snaps[0].snapDate)
+      .reduce((s, t) => s + t.amount, 0);
+
+  return computeDailyReturns(snaps, depositsByDay, baseContributions);
 }
 
 /**
@@ -378,22 +422,15 @@ export async function getReturnSeries(
   const { dates, returns } = await getDailyReturns(kidId);
 
   // Anchor the race at a synthetic 0% "start" point the day before the first
-  // snapshot, and value the first snapshot against the money put in by then
-  // (starting budget + deposits). Day one then draws a real line segment —
-  // not a single floating dot — and the whole series lines up with the
+  // snapshot. getDailyReturns already includes day one (first snapshot vs.
+  // money put in by then), so compounding its returns from 100 draws a real
+  // line segment on day one and lines the whole series up with the
   // "since start" numbers on the scoreboard.
-  const baseContrib =
-    kid.startingBudget +
-    txs
-      .filter((t) => t.type === "deposit" && t.tradeDate <= snaps[0].snapDate)
-      .reduce((s, t) => s + t.amount, 0);
-
   const originDate = new Date(`${snaps[0].snapDate}T12:00:00Z`);
   originDate.setUTCDate(originDate.getUTCDate() - 1);
 
   const series = [{ date: originDate.toISOString().slice(0, 10), index: 100 }];
-  let idx = baseContrib > 0 ? (snaps[0].value / baseContrib) * 100 : 100;
-  series.push({ date: snaps[0].snapDate, index: idx });
+  let idx = 100;
   for (let i = 0; i < dates.length; i++) {
     idx *= 1 + returns[i];
     series.push({ date: dates[i], index: idx });
@@ -453,6 +490,39 @@ async function getWeekReturnPct(kidId: number, p: Portfolio): Promise<number | n
   return p.contributions > 0 ? p.totalReturnPct : null;
 }
 
+/**
+ * Volatility, risk label, and Sharpe from a series of daily returns. Pure —
+ * exported for the math regression script (scripts/test-sharpe-math.ts).
+ *
+ * Sharpe = (mean(r) - rf_daily) / std(r) * sqrt(252),  rf_daily = 0.045 / 252
+ *
+ * i.e. the DAILY risk-free rate is subtracted from the mean DAILY return
+ * before annualizing (algebraically identical to
+ * (mean*252 - 0.045) / (std*sqrt(252))). std is the sample standard
+ * deviation (n-1). Volatility/risk show from 2 observations; Sharpe waits
+ * for MIN_SHARPE_DAYS because annualizing a 2-3 day sample produces junk.
+ */
+export function computeRiskStats(
+  rets: number[]
+): Pick<PortfolioStats, "volatilityAnnualPct" | "sharpe" | "riskLabel"> {
+  if (rets.length < 2) {
+    return { volatilityAnnualPct: null, sharpe: null, riskLabel: null };
+  }
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+  const dailyVol = Math.sqrt(variance);
+  const annualVol = dailyVol * Math.sqrt(252);
+  const sharpe =
+    rets.length >= MIN_SHARPE_DAYS && dailyVol > 0
+      ? ((mean - RISK_FREE_RATE / 252) / dailyVol) * Math.sqrt(252)
+      : null;
+
+  const riskLabel: PortfolioStats["riskLabel"] =
+    annualVol < 0.15 ? "Low" : annualVol < 0.28 ? "Medium" : "High";
+
+  return { volatilityAnnualPct: annualVol * 100, sharpe, riskLabel };
+}
+
 export async function getStats(kidId: number, portfolio?: Portfolio): Promise<PortfolioStats> {
   const p = portfolio ?? (await getPortfolio(kidId));
 
@@ -462,38 +532,11 @@ export async function getStats(kidId: number, portfolio?: Portfolio): Promise<Po
   const sinceStartReturnPct = hasStarted ? p.totalReturnPct : null;
   const weekReturnPct = hasStarted ? await getWeekReturnPct(kidId, p) : null;
 
-  // Risk and Sharpe genuinely need a series of day-over-day returns between
-  // snapshots, so they stay null (the UI shows a "warming up" hint) until
-  // there are at least two daily return observations (~3 market days).
+  // Risk and Sharpe genuinely need a series of daily returns between
+  // snapshots; computeRiskStats keeps them null (the UI shows a "warming up"
+  // hint) until there's enough history.
   const { returns: rets } = await getDailyReturns(kidId);
-  if (rets.length < 2) {
-    return {
-      volatilityAnnualPct: null,
-      sharpe: null,
-      riskLabel: null,
-      weekReturnPct,
-      sinceStartReturnPct,
-    };
-  }
-
-  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
-  const variance =
-    rets.reduce((s, r) => s + (r - mean) ** 2, 0) / Math.max(rets.length - 1, 1);
-  const dailyVol = Math.sqrt(variance);
-  const annualVol = dailyVol * Math.sqrt(252);
-  const annualRet = mean * 252;
-  const sharpe = annualVol > 0 ? (annualRet - RISK_FREE_RATE) / annualVol : null;
-
-  const riskLabel: PortfolioStats["riskLabel"] =
-    annualVol < 0.15 ? "Low" : annualVol < 0.28 ? "Medium" : "High";
-
-  return {
-    volatilityAnnualPct: annualVol * 100,
-    sharpe,
-    riskLabel,
-    weekReturnPct,
-    sinceStartReturnPct,
-  };
+  return { ...computeRiskStats(rets), weekReturnPct, sinceStartReturnPct };
 }
 
 // ── Attribution (who moved my portfolio today / this week) ───────

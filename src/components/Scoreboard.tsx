@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { formatSharpe } from "@/lib/sharpeDisplay";
 
 export type ScoreRow = {
   id: number;
@@ -126,7 +127,7 @@ export default function Scoreboard({ rows }: { rows: ScoreRow[] }) {
                   )}
                 </td>
                 <td className="px-2 py-3 text-right tabular">
-                  {r.sharpe != null ? r.sharpe.toFixed(2) : <WarmingUp align="right" />}
+                  {r.sharpe != null ? <SharpeCell value={r.sharpe} /> : <WarmingUp align="right" />}
                 </td>
               </motion.tr>
             ))}
@@ -152,6 +153,18 @@ function WarmingUp({ align }: { align?: "right" }) {
     >
       ⏳ warming up
     </span>
+  );
+}
+
+/** Sharpe capped at ±5 for display; hover shows the exact value when capped. */
+function SharpeCell({ value }: { value: number }) {
+  const { text, title } = formatSharpe(value);
+  return title ? (
+    <span title={title} className="cursor-help">
+      {text}
+    </span>
+  ) : (
+    <span>{text}</span>
   );
 }
 
